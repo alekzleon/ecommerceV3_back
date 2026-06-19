@@ -64,6 +64,7 @@ class Product extends Model
         'description',
         'image_path',
         'default_price',
+        'stock',
         'sku',
         'short_description',
         'is_active',
@@ -84,6 +85,7 @@ class Product extends Model
         'fecha_hora_creacion' => 'datetime',
         'fecha_hora_ult_modif' => 'datetime',
         'default_price' => 'decimal:2',
+        'stock' => 'decimal:2',
         'is_active' => 'boolean',
         'processed' => 'boolean',
     ];

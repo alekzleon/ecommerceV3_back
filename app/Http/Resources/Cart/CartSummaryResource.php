@@ -25,6 +25,11 @@ class CartSummaryResource extends JsonResource
                 'total' => 0.0,
                 'items' => [],
             ]),
+            'coupon' => data_get($this->metadata, 'coupon'),
+            'loyalty' => data_get($this->metadata, 'loyalty', [
+                'first_purchase_discount' => null,
+                'cashback' => null,
+            ]),
         ];
     }
 }

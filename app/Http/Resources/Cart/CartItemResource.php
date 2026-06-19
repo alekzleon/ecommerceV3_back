@@ -35,6 +35,7 @@ class CartItemResource extends JsonResource
             'category' => $this->category_snapshot,
             'family' => $this->family_snapshot,
             'status' => $this->status,
+            'stock' => $this->stockPayload(),
 
             // cantidades
             'quantity' => (float) $this->quantity,
@@ -83,6 +84,35 @@ class CartItemResource extends JsonResource
                 'name' => $this->promotion_name_snapshot,
                 'snapshot' => $this->promotion_snapshot,
             ] : null,
+        ];
+    }
+
+    protected function stockPayload(): array
+    {
+        $stock = $this->product?->stock;
+        $requestedQuantity = (float) $this->quantity;
+
+        if ($stock === null) {
+            return [
+                'is_tracked' => false,
+                'is_valid' => true,
+                'available_stock' => null,
+                'requested_quantity' => $requestedQuantity,
+                'message' => null,
+            ];
+        }
+
+        $availableStock = (float) $stock;
+        $isValid = $availableStock > 0 && $requestedQuantity <= $availableStock;
+
+        return [
+            'is_tracked' => true,
+            'is_valid' => $isValid,
+            'available_stock' => $availableStock,
+            'requested_quantity' => $requestedQuantity,
+            'message' => $isValid
+                ? ($availableStock < 5 ? 'Hay pocas piezas disponibles.' : null)
+                : ($availableStock <= 0 ? 'Producto sin inventario disponible.' : "Solo hay {$availableStock} pieza(s) disponibles."),
         ];
     }
 }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Mail\ContactAdminMail;
 use App\Mail\ContactCustomerMail;
+use App\Models\SiteSetting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -25,7 +26,7 @@ class ContactController extends Controller
             'message.required' => 'El mensaje es obligatorio.',
         ]);
 
-        $contactEmail = 'alekzleon03.aa@gmail.com';
+        $contactEmail = SiteSetting::current()->forms_recipient_email ?: 'alekzleon03.aa@gmail.com';
 
         try {
             Mail::to($contactEmail)->send(new ContactAdminMail($validated));

@@ -10,11 +10,6 @@ use Illuminate\Support\Str;
 
 class SearchSuggestionController extends Controller
 {
-    public function __construct(
-        protected ProductPriceService $productPriceService
-    ) {
-    }
-
     public function index(Request $request)
     {
         $query = trim((string) $request->get('q', ''));
@@ -60,11 +55,6 @@ class SearchSuggestionController extends Controller
             })
             ->limit(8)
             ->get();
-
-        $this->productPriceService->decorateProducts(
-            $products,
-            $request->user('sanctum') ?? $request->user()
-        );
 
         $brands = Product::query()
             ->where('is_active', true)
@@ -127,9 +117,7 @@ class SearchSuggestionController extends Controller
             'did_you_mean' => $didYouMean,
             'suggestions' => [
                 'products' => $products->map(function ($product) {
-                    $price = $product->getAttribute('current_price') !== null
-                        ? (float) $product->getAttribute('current_price')
-                        : (float) $product->default_price;
+                    $price = (float) $product->default_price;
 
                     return [
                         'id' => $product->id,
@@ -141,10 +129,10 @@ class SearchSuggestionController extends Controller
                         'price' => $price,
                         'base_default_price' => (float) $product->default_price,
                         'price_info' => [
-                            'precio_empresa_id' => $product->getAttribute('price_company_id') ?? ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
-                            'requested_precio_empresa_id' => $product->getAttribute('requested_price_company_id') ?? ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
-                            'is_default_price_list' => (bool) ($product->getAttribute('is_default_price_list') ?? true),
-                            'source' => $product->getAttribute('price_source') ?? 'precios_articulos_default_missing',
+                            'precio_empresa_id' => ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
+                            'requested_precio_empresa_id' => ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
+                            'is_default_price_list' => true,
+                            'source' => 'products.default_price',
                         ],
                         'category' => $product->category?->name,
                         'family' => $product->family?->name,

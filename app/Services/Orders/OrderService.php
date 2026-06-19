@@ -4,7 +4,10 @@ namespace App\Services\Orders;
 
 use App\Enums\CartStatus;
 use App\Models\Cart;
+use App\Models\CashbackTransaction;
 use App\Models\ClaveArticulo;
+use App\Models\Coupon;
+use App\Models\CouponRedemption;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\CartService;
@@ -76,6 +79,8 @@ class OrderService
                     'orden_compra' => $ordenCompra,
                     'dir_cli_id' => data_get($preview, 'shipping.selected_address.dir_cli_id'),
                     'promotions_applied' => data_get($preview, 'promotions_applied', []),
+                    'coupon' => data_get($preview, 'coupon'),
+                    'loyalty' => data_get($preview, 'loyalty', []),
                     'tax_breakdown' => data_get($preview, 'totals.tax_breakdown', []),
                 ],
             ]);
@@ -128,6 +133,9 @@ class OrderService
                 ]);
             }
 
+            $this->recordLoyaltyTransactions($order, $preview);
+            $this->recordCouponRedemption($order, $preview);
+
             $cart->forceFill([
                 'status' => CartStatus::CONVERTED->value,
                 'converted_at' => now(),
@@ -147,6 +155,75 @@ class OrderService
 
             return $order->load('items');
         });
+    }
+
+    protected function recordLoyaltyTransactions(Order $order, array $preview): void
+    {
+        $cashbackApplied = round((float) data_get($preview, 'loyalty.cashback.applied_amount', 0), 2);
+        $cashbackEarned = round((float) data_get($preview, 'loyalty.cashback.earn.amount', 0), 2);
+
+        if ($cashbackApplied > 0) {
+            CashbackTransaction::create([
+                'user_id' => $order->user_id,
+                'order_id' => $order->id,
+                'type' => CashbackTransaction::TYPE_DEBIT,
+                'status' => CashbackTransaction::STATUS_PENDING,
+                'amount' => $cashbackApplied,
+                'description' => 'Cashback usado en pedido ' . $order->number,
+                'metadata' => [
+                    'order_number' => $order->number,
+                ],
+            ]);
+        }
+
+        if ($cashbackEarned > 0) {
+            CashbackTransaction::create([
+                'user_id' => $order->user_id,
+                'order_id' => $order->id,
+                'type' => CashbackTransaction::TYPE_CREDIT,
+                'status' => CashbackTransaction::STATUS_PENDING,
+                'amount' => $cashbackEarned,
+                'description' => 'Cashback generado por pedido ' . $order->number,
+                'metadata' => [
+                    'order_number' => $order->number,
+                    'earn_percentage' => data_get($preview, 'loyalty.cashback.earn.percentage'),
+                ],
+            ]);
+        }
+    }
+
+    protected function recordCouponRedemption(Order $order, array $preview): void
+    {
+        $couponId = data_get($preview, 'coupon.id');
+        $couponDiscount = round((float) data_get($preview, 'coupon.discount_amount', 0), 2);
+
+        if (!$couponId || $couponDiscount <= 0) {
+            return;
+        }
+
+        $alreadyExists = CouponRedemption::query()
+            ->where('coupon_id', $couponId)
+            ->where('order_id', $order->id)
+            ->exists();
+
+        if ($alreadyExists) {
+            return;
+        }
+
+        CouponRedemption::create([
+            'coupon_id' => $couponId,
+            'user_id' => $order->user_id,
+            'order_id' => $order->id,
+            'discount_amount' => $couponDiscount,
+            'metadata' => [
+                'order_number' => $order->number,
+                'coupon' => data_get($preview, 'coupon'),
+            ],
+        ]);
+
+        Coupon::query()
+            ->whereKey($couponId)
+            ->increment('usage_count');
     }
 
     public function restoreCartFromPendingOrder(Order $order, User $user, string $reason = 'payment_cancelled'): Cart

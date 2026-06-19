@@ -2,8 +2,10 @@
 
 namespace App\Services\Payments;
 
+use App\Models\CashbackTransaction;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\Product;
 use App\Models\StripeWebhookEvent;
 use App\Services\Orders\DoctoVeService;
 use App\Services\Orders\OrderNotificationService;
@@ -31,6 +33,7 @@ class StripePaymentService
         abort_if(blank($secretKey), 500, 'Stripe no está configurado.');
 
         $order->loadMissing(['items', 'user']);
+        $this->validateOrderStock($order);
 
         $payload = [
             'mode' => 'payment',
@@ -277,6 +280,8 @@ class StripePaymentService
     protected function markOrderPaid(Order $order, ?string $sessionId, ?string $paymentIntentId): void
     {
         if ($order->payment_status === Order::PAYMENT_PAID) {
+            $this->deductOrderStock($order->fresh(['items.product']));
+            $this->activateCashbackTransactions($order);
             $this->doctoVeService->createFromPaidOrder($order->fresh(['user.customerProfile', 'items.product']));
             $this->orderNotificationService->sendPurchaseNotifications($order->fresh(['user.customerProfile', 'user.customerPfrProfile', 'user.defaultAddress', 'items', 'payments']));
 
@@ -292,9 +297,83 @@ class StripePaymentService
             'paid_at' => now(),
         ])->save();
 
+        $this->deductOrderStock($order->fresh(['items.product']));
+        $this->activateCashbackTransactions($order);
+
         $this->doctoVeService->createFromPaidOrder($order->fresh(['user.customerProfile', 'items.product']));
 
         $this->orderNotificationService->sendPurchaseNotifications($order->fresh(['user.customerProfile', 'user.customerPfrProfile', 'user.defaultAddress', 'items', 'payments']));
+    }
+
+    protected function activateCashbackTransactions(Order $order): void
+    {
+        CashbackTransaction::query()
+            ->where('order_id', $order->id)
+            ->where('status', CashbackTransaction::STATUS_PENDING)
+            ->update(['status' => CashbackTransaction::STATUS_AVAILABLE]);
+    }
+
+    protected function validateOrderStock(Order $order): void
+    {
+        $order->loadMissing('items.product');
+
+        foreach ($order->items as $item) {
+            $product = $item->product;
+
+            if (!$product || $product->stock === null) {
+                continue;
+            }
+
+            abort_if((float) $product->stock <= 0, 422, "El producto {$item->name_snapshot} ya no tiene inventario disponible.");
+            abort_if((float) $product->stock < (float) $item->quantity, 422, "El producto {$item->name_snapshot} solo tiene {$product->stock} pieza(s) disponibles.");
+        }
+    }
+
+    protected function deductOrderStock(Order $order): void
+    {
+        $metadata = $order->metadata ?? [];
+
+        if (data_get($metadata, 'stock_deducted_at')) {
+            return;
+        }
+
+        DB::transaction(function () use ($order, $metadata) {
+            $deducted = [];
+
+            foreach ($order->items as $item) {
+                if (!$item->product_id) {
+                    continue;
+                }
+
+                $product = Product::query()
+                    ->whereKey($item->product_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$product || $product->stock === null) {
+                    continue;
+                }
+
+                $before = (float) $product->stock;
+                $quantity = (float) $item->quantity;
+                $after = max(0, round($before - $quantity, 2));
+
+                $product->forceFill(['stock' => $after])->save();
+
+                $deducted[] = [
+                    'product_id' => $product->id,
+                    'sku' => $item->sku_snapshot,
+                    'quantity' => $quantity,
+                    'stock_before' => $before,
+                    'stock_after' => $after,
+                ];
+            }
+
+            $metadata['stock_deducted_at'] = now()->toDateTimeString();
+            $metadata['stock_deductions'] = $deducted;
+
+            $order->forceFill(['metadata' => $metadata])->save();
+        });
     }
 
     protected function syncPayment(Order $order, array $data): Payment

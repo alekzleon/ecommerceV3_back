@@ -17,10 +17,18 @@ class UpdateBannerRequest extends FormRequest
     {
         $data = [];
 
+        if (!$this->has('title') && $this->has('name')) {
+            $data['title'] = $this->filled('name') ? trim((string) $this->input('name')) : null;
+        }
+
         foreach (['title', 'subtitle', 'description', 'link_url', 'button_text'] as $field) {
             if ($this->has($field)) {
                 $data[$field] = $this->filled($field) ? trim((string) $this->input($field)) : null;
             }
+        }
+
+        if ($this->has('name')) {
+            $data['name'] = $this->filled('name') ? trim((string) $this->input('name')) : null;
         }
 
         if ($this->has('is_active')) {
@@ -33,6 +41,7 @@ class UpdateBannerRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'title' => ['sometimes', 'nullable', 'string', 'max:255'],
             'subtitle' => ['sometimes', 'nullable', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string'],

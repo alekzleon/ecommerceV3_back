@@ -23,7 +23,6 @@ class AdminPromotionResource extends JsonResource
 
             'requires_login' => $this->requires_login,
             'is_general' => $this->is_general,
-            'is_combinable' => $this->is_combinable,
 
             'priority' => $this->priority,
 
@@ -59,6 +58,20 @@ class AdminPromotionResource extends JsonResource
 
             'gift_item_ids' => $this->whenLoaded('giftItems', fn () => $this->giftItems->pluck('id')->values(), []),
             'gift_items_count' => (int) ($this->gift_items_count ?? $this->giftItems()->count()),
+
+            'users' => $this->whenLoaded('users', function () {
+                return $this->users->map(function ($user) {
+                    return [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'username' => $user->username,
+                    ];
+                });
+            }, []),
+
+            'user_ids' => $this->whenLoaded('users', fn () => $this->users->pluck('id')->values(), []),
+            'users_count' => (int) ($this->users_count ?? $this->users()->count()),
 
             'created_at' => $this->created_at,
         ];

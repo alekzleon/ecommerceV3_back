@@ -7,17 +7,11 @@ use App\Http\Requests\Account\ToggleFavoriteRequest;
 use App\Http\Resources\Account\FavoriteProductResource;
 use App\Models\Product;
 use App\Models\ProductFavorite;
-use App\Services\ProductPriceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class FavoriteController extends Controller
 {
-    public function __construct(
-        protected ProductPriceService $productPriceService
-    ) {
-    }
-
     public function index(Request $request): JsonResponse
     {
         $perPage = max(1, (int) $request->integer('per_page', 24));
@@ -32,8 +26,6 @@ class FavoriteController extends Controller
             ->orderByDesc('product_favorites.created_at')
             ->paginate($perPage)
             ->appends($request->query());
-
-        $this->productPriceService->decorateProducts($favorites->getCollection(), $request->user());
 
         return response()->json([
             'ok' => true,
@@ -89,7 +81,6 @@ class FavoriteController extends Controller
         if ($product) {
             $product->setAttribute('is_favorite_for_current_user', $isFavorite);
             $product->setAttribute('favorite_created_at', $favoritedAt);
-            $this->productPriceService->decorateProducts(collect([$product]), $user);
         }
 
         return response()->json([

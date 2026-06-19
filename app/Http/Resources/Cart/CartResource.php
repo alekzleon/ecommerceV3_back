@@ -76,6 +76,11 @@ class CartResource extends JsonResource
                 'total' => 0.0,
                 'items' => [],
             ]),
+            'coupon' => data_get($this->metadata, 'coupon'),
+            'loyalty' => data_get($this->metadata, 'loyalty', [
+                'first_purchase_discount' => null,
+                'cashback' => null,
+            ]),
             'total' => (float) $this->total_snapshot,
             'last_activity_at' => $this->last_activity_at,
             'shipping' => $shipping,

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Mail\ContactLeadAdminMail;
 use App\Mail\ContactLeadCustomerMail;
+use App\Models\SiteSetting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -23,7 +24,7 @@ class ContactLeadController extends Controller
             'email.email' => 'El correo no tiene un formato válido.',
         ]);
 
-        $contactEmail = 'alekzleon03.aa@gmail.com';
+        $contactEmail = SiteSetting::current()->forms_recipient_email ?: 'alekzleon03.aa@gmail.com';
 
         try {
             Mail::to($contactEmail)->send(new ContactLeadAdminMail($validated));

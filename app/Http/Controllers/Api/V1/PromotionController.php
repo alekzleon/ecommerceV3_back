@@ -303,7 +303,6 @@ class PromotionController extends Controller
             'is_active' => (bool) $promotion->is_active,
             'requires_login' => (bool) $promotion->requires_login,
             'is_general' => (bool) $promotion->is_general,
-            'is_combinable' => (bool) $promotion->is_combinable,
             'starts_at' => $promotion->starts_at?->toDateTimeString(),
             'ends_at' => $promotion->ends_at?->toDateTimeString(),
             'config' => $promotion->config,

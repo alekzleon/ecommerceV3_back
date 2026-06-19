@@ -136,6 +136,12 @@ class StoreProductRequest extends FormRequest
                 'min:0',
             ],
 
+            'stock' => [
+                'nullable',
+                'numeric',
+                'min:0',
+            ],
+
             'sku' => [
                 'nullable',
                 'string',

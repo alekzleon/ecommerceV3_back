@@ -76,15 +76,13 @@ class FavoriteProductResource extends JsonResource
             'short_description' => $this->short_description,
             'image_path' => $this->image_path,
             'image_url' => $this->image_url,
-            'default_price' => $this->getAttribute('current_price') !== null
-                ? (float) $this->getAttribute('current_price')
-                : ($this->default_price !== null ? (float) $this->default_price : null),
+            'default_price' => $this->default_price !== null ? (float) $this->default_price : null,
             'base_default_price' => $this->default_price !== null ? (float) $this->default_price : null,
             'price_info' => [
-                'precio_empresa_id' => $this->getAttribute('price_company_id') ?? ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
-                'requested_precio_empresa_id' => $this->getAttribute('requested_price_company_id') ?? ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
-                'is_default_price_list' => (bool) ($this->getAttribute('is_default_price_list') ?? true),
-                'source' => $this->getAttribute('price_source') ?? 'precios_articulos_default_missing',
+                'precio_empresa_id' => ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
+                'requested_precio_empresa_id' => ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
+                'is_default_price_list' => true,
+                'source' => 'products.default_price',
             ],
             'sku' => $this->sku,
             'is_active' => (bool) $this->is_active,

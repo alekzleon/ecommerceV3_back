@@ -10,6 +10,7 @@ use App\Http\Resources\Promotion\AdminPromotionResource;
 use App\Models\GiftItem;
 use App\Models\Product;
 use App\Models\Promotion;
+use App\Models\User;
 use App\Services\ActivityLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,8 +25,9 @@ class PromotionController extends Controller
             ->with([
                 'products:id,name,sku',
                 'giftItems:id,name,code,estimated_value,unit_label,is_active',
+                'users:id,name,email,username,role_id',
             ])
-            ->withCount(['products', 'giftItems'])
+            ->withCount(['products', 'giftItems', 'users'])
             ->latest()
             ->paginate($perPage)
             ->appends($request->query());
@@ -77,16 +79,30 @@ class PromotionController extends Controller
             ->pluck('brand')
             ->values();
 
+        $clients = User::query()
+            ->where('role_id', User::ROLE_CLIENTE)
+            ->orderBy('name')
+            ->get(['id', 'name', 'email', 'username'])
+            ->map(fn (User $user) => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'username' => $user->username,
+            ])
+            ->values();
+
         return response()->json([
             'ok' => true,
             'data' => [
                 'promotion_types' => $promotionTypes,
                 'gift_items' => $giftItems,
                 'brand_options' => $brandOptions,
+                'clients' => $clients,
                 'new_admin_types' => [
                     PromotionType::BUY_SKU_GET_GIFT_ITEM->value,
                     PromotionType::BRAND_AMOUNT_CHOOSE_GIFT_ITEM->value,
                     PromotionType::BRAND_AMOUNT_GET_PRODUCT->value,
+                    PromotionType::PRICE_SCALE_PERCENTAGE->value,
                 ],
             ],
         ]);
@@ -97,8 +113,9 @@ class PromotionController extends Controller
         $validated = $request->validated();
         $productIds = $validated['product_ids'] ?? [];
         $giftItemIds = $validated['gift_item_ids'] ?? [];
+        $userIds = $validated['user_ids'] ?? [];
 
-        unset($validated['product_ids'], $validated['gift_item_ids']);
+        unset($validated['product_ids'], $validated['gift_item_ids'], $validated['user_ids'], $validated['is_combinable']);
 
         $promotion = Promotion::create([
             ...$validated,
@@ -113,16 +130,21 @@ class PromotionController extends Controller
             $promotion->giftItems()->sync($giftItemIds);
         }
 
-        if (!empty($productIds) || !empty($giftItemIds)) {
+        if (!$promotion->is_general) {
+            $promotion->users()->sync($userIds);
+        }
+
+        if (!empty($productIds) || !empty($giftItemIds) || !empty($userIds)) {
             app(ActivityLogService::class)->record([
                 'module' => 'promotions',
                 'action' => 'promotion_relations_synced',
-                'summary' => 'Productos/regalos de promoción asignados',
+                'summary' => 'Productos/regalos/clientes de promoción asignados',
                 'entity_type' => 'promotion',
                 'entity_id' => $promotion->id,
                 'new_values' => [
                     'product_ids' => array_values($productIds),
                     'gift_item_ids' => array_values($giftItemIds),
+                    'user_ids' => array_values($userIds),
                 ],
                 'metadata' => [
                     'name' => $promotion->name,
@@ -133,7 +155,7 @@ class PromotionController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Promoción creada correctamente.',
-            'data' => new AdminPromotionResource($promotion->fresh()->load(['products', 'giftItems'])),
+            'data' => new AdminPromotionResource($promotion->fresh()->load(['products', 'giftItems', 'users'])),
         ], 201);
     }
 
@@ -141,7 +163,7 @@ class PromotionController extends Controller
     {
         return response()->json([
             'ok' => true,
-            'data' => new AdminPromotionResource($promotion->load(['products', 'giftItems'])),
+            'data' => new AdminPromotionResource($promotion->load(['products', 'giftItems', 'users'])),
         ]);
     }
 
@@ -150,10 +172,12 @@ class PromotionController extends Controller
         $validated = $request->validated();
         $productIds = $validated['product_ids'] ?? [];
         $giftItemIds = $validated['gift_item_ids'] ?? [];
+        $userIds = $validated['user_ids'] ?? [];
         $oldProductIds = $promotion->products()->pluck('products.id')->all();
         $oldGiftItemIds = $promotion->giftItems()->pluck('gift_items.id')->all();
+        $oldUserIds = $promotion->users()->pluck('users.id')->all();
 
-        unset($validated['product_ids'], $validated['gift_item_ids']);
+        unset($validated['product_ids'], $validated['gift_item_ids'], $validated['user_ids'], $validated['is_combinable']);
 
         $validated['config'] = array_merge($promotion->config ?? [], $validated['config'] ?? []);
 
@@ -167,20 +191,30 @@ class PromotionController extends Controller
             $promotion->giftItems()->sync($giftItemIds);
         }
 
-        if ($request->has('product_ids') || $request->has('gift_item_ids')) {
+        if ($promotion->is_general) {
+            $promotion->users()->sync([]);
+        } elseif ($request->has('user_ids')) {
+            $promotion->users()->sync($userIds);
+        }
+
+        if ($request->has('product_ids') || $request->has('gift_item_ids') || $request->has('user_ids') || $request->has('is_general')) {
             app(ActivityLogService::class)->record([
                 'module' => 'promotions',
                 'action' => 'promotion_relations_synced',
-                'summary' => 'Productos/regalos de promoción actualizados',
+                'summary' => 'Productos/regalos/clientes de promoción actualizados',
                 'entity_type' => 'promotion',
                 'entity_id' => $promotion->id,
                 'old_values' => [
                     'product_ids' => array_values($oldProductIds),
                     'gift_item_ids' => array_values($oldGiftItemIds),
+                    'user_ids' => array_values($oldUserIds),
                 ],
                 'new_values' => [
                     'product_ids' => $request->has('product_ids') ? array_values($productIds) : array_values($oldProductIds),
                     'gift_item_ids' => $request->has('gift_item_ids') ? array_values($giftItemIds) : array_values($oldGiftItemIds),
+                    'user_ids' => $promotion->is_general
+                        ? []
+                        : ($request->has('user_ids') ? array_values($userIds) : array_values($oldUserIds)),
                 ],
                 'metadata' => [
                     'name' => $promotion->name,
@@ -191,7 +225,7 @@ class PromotionController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Promoción actualizada correctamente.',
-            'data' => new AdminPromotionResource($promotion->fresh()->load(['products', 'giftItems'])),
+            'data' => new AdminPromotionResource($promotion->fresh()->load(['products', 'giftItems', 'users'])),
         ]);
     }
 
@@ -249,7 +283,7 @@ class PromotionController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Productos de la promoción sincronizados correctamente.',
-            'data' => new AdminPromotionResource($promotion->fresh()->load(['products', 'giftItems'])),
+            'data' => new AdminPromotionResource($promotion->fresh()->load(['products', 'giftItems', 'users'])),
         ]);
     }
 }

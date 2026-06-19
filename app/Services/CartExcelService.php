@@ -27,8 +27,6 @@ class CartExcelService
             ->orderBy('name')
             ->get();
 
-        $this->productPriceService->decorateProducts($products, $user);
-
         $inventoryRows = $products
             ->map(fn (Product $product) => [
                 (string) $product->id,
@@ -37,7 +35,7 @@ class CartExcelService
                 (string) ($product->brand ?? ''),
                 (string) ($product->category?->name ?? ''),
                 (string) ($product->family?->name ?? ''),
-                number_format((float) ($product->getAttribute('current_price') ?? $product->default_price), 2, '.', ''),
+                number_format((float) $product->default_price, 2, '.', ''),
                 $product->is_active ? '1' : '0',
             ])
             ->values()

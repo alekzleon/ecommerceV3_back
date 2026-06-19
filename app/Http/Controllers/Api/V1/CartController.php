@@ -152,6 +152,68 @@ class CartController extends Controller
         ]);
     }
 
+    public function applyCashback(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0.01'],
+        ]);
+
+        $cart = $this->cartService->getOrCreateActiveCart($request->user());
+        $metadata = $cart->metadata ?? [];
+        data_set($metadata, 'loyalty.cashback.applied_amount', round((float) $validated['amount'], 2));
+
+        $cart->forceFill(['metadata' => $metadata])->save();
+        $cart = $this->cartService->recalculateCart($cart);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cashback aplicado correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
+    public function clearCashback(Request $request): JsonResponse
+    {
+        $cart = $this->cartService->getOrCreateActiveCart($request->user());
+        $metadata = $cart->metadata ?? [];
+        data_set($metadata, 'loyalty.cashback.applied_amount', 0);
+
+        $cart->forceFill(['metadata' => $metadata])->save();
+        $cart = $this->cartService->recalculateCart($cart);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cashback eliminado correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
+    public function applyCoupon(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'code' => ['required', 'string', 'max:80'],
+        ]);
+
+        $cart = $this->cartService->applyCoupon($request->user(), $validated['code']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cupón aplicado correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
+    public function clearCoupon(Request $request): JsonResponse
+    {
+        $cart = $this->cartService->clearCoupon($request->user());
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cupón eliminado correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
     public function downloadExcelLayout(Request $request): BinaryFileResponse
     {
         $path = $this->cartExcelService->createLayoutWorkbookPath($request->user());

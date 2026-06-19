@@ -16,6 +16,11 @@
 
     <p>Hola {{ $user->name ?? 'cliente' }}, recibimos tu compra correctamente.</p>
 
+    @php
+        $coupon = data_get($order->metadata, 'coupon');
+        $couponDiscount = (float) data_get($coupon, 'discount_amount', 0);
+    @endphp
+
     <table style="border-collapse: collapse; width: 100%; margin-top: 16px;">
         <thead>
             <tr>
@@ -31,12 +36,18 @@
                     $giftUnits = (float) data_get($item->metadata, 'gift_units', data_get($item->promotion_snapshot, 'gift_units', 0));
                     $giftLineTotal = (float) data_get($item->metadata, 'gift_line_total', data_get($item->promotion_snapshot, 'gift_line_total', 0));
                     $giftUnitPrice = data_get($item->metadata, 'gift_unit_accounting_price', data_get($item->promotion_snapshot, 'gift_unit_accounting_price'));
+                    $discountPercentage = data_get($item->promotion_snapshot, 'discount_percentage');
+                    $fromQuantity = data_get($item->promotion_snapshot, 'from_quantity');
+                    $toQuantity = data_get($item->promotion_snapshot, 'to_quantity');
                 @endphp
                 <tr>
                     <td style="border-bottom: 1px solid #f3f4f6; padding: 8px;">
                         {{ $item->name_snapshot }}
                         @if ($item->promotion_name_snapshot)
                             <br><span style="color: #6b7280; font-size: 12px;">Promo: {{ $item->promotion_name_snapshot }}</span>
+                        @endif
+                        @if ($discountPercentage && $fromQuantity)
+                            <br><span style="color: #6b7280; font-size: 12px;">Escala aplicada: {{ $discountPercentage }}% desde {{ $fromQuantity }}{{ $toQuantity ? ' hasta '.$toQuantity : '+' }} pieza(s)</span>
                         @endif
                         @if ($giftUnits > 0)
                             <br><span style="color: #6b7280; font-size: 12px;">Incluye {{ $giftUnits }} unidad(es) de regalo facturadas a ${{ number_format((float) $giftUnitPrice, 2) }}</span>
@@ -66,6 +77,12 @@
             <td style="padding: 4px 12px;">Descuento</td>
             <td style="padding: 4px 12px; text-align: right;">${{ number_format((float) $order->discount, 2) }}</td>
         </tr>
+        @if ($couponDiscount > 0)
+            <tr>
+                <td style="padding: 4px 12px;">Cupón {{ data_get($coupon, 'code') }}</td>
+                <td style="padding: 4px 12px; text-align: right;">-${{ number_format($couponDiscount, 2) }}</td>
+            </tr>
+        @endif
         <tr>
             <td style="padding: 4px 12px;">Impuestos</td>
             <td style="padding: 4px 12px; text-align: right;">${{ number_format((float) $order->tax, 2) }}</td>

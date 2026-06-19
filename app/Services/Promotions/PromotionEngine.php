@@ -159,6 +159,7 @@ class PromotionEngine
             PromotionType::BUY_SKU_GET_GIFT_ITEM => $this->calculateBuySkuGetGiftItem($promotion, $item),
             PromotionType::BRAND_AMOUNT_CHOOSE_GIFT_ITEM => $this->calculateBrandAmountChooseGiftItem($promotion, $item, $cartItems),
             PromotionType::BRAND_AMOUNT_GET_PRODUCT => $this->calculateBrandAmountGetProduct($promotion, $item, $cartItems),
+            PromotionType::PRICE_SCALE_PERCENTAGE => $this->calculatePriceScalePercentage($promotion, $item),
             default => null,
         };
     }
@@ -219,6 +220,70 @@ class PromotionEngine
                 'promotional_price' => $promotionalPrice,
                 'original_price' => $baseUnitPrice,
                 'show_strikethrough' => true,
+            ],
+        ];
+    }
+
+    protected function calculatePriceScalePercentage(Promotion $promotion, CartItem $item): ?array
+    {
+        if (! $this->promotionTargetsItem($promotion, $item)) {
+            return null;
+        }
+
+        $quantity = $this->integerQuantity($item);
+        $activeScales = collect(data_get($promotion->config, 'scales', []))
+            ->filter(fn ($scale) => filter_var($scale['is_active'] ?? true, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true)
+            ->map(fn ($scale) => [
+                'from_quantity' => (int) ($scale['from_quantity'] ?? 0),
+                'to_quantity' => isset($scale['to_quantity']) && $scale['to_quantity'] !== ''
+                    ? (int) $scale['to_quantity']
+                    : null,
+                'discount_percentage' => (float) ($scale['discount_percentage'] ?? 0),
+                'is_active' => true,
+            ])
+            ->filter(fn ($scale) => $scale['from_quantity'] > 0 && $scale['discount_percentage'] > 0)
+            ->sortBy('from_quantity')
+            ->values();
+
+        $scale = $activeScales
+            ->filter(function ($scale) use ($quantity) {
+                if ($quantity < $scale['from_quantity']) {
+                    return false;
+                }
+
+                return $scale['to_quantity'] === null || $quantity <= $scale['to_quantity'];
+            })
+            ->sortByDesc('from_quantity')
+            ->first();
+
+        if (!$scale) {
+            return null;
+        }
+
+        $percentage = (float) ($scale['discount_percentage'] ?? 0);
+
+        if ($percentage <= 0) {
+            return null;
+        }
+
+        $baseUnitPrice = (float) $item->base_unit_price_snapshot;
+        $discountAmount = round(($baseUnitPrice * $quantity) * ($percentage / 100), 2);
+
+        return [
+            'promotion' => $promotion,
+            'discount_amount' => $discountAmount,
+            'promotion_snapshot' => [
+                'label' => $promotion->type->label(),
+                'type' => $promotion->type->value,
+                'discount_percentage' => $percentage,
+                'from_quantity' => (int) $scale['from_quantity'],
+                'to_quantity' => $scale['to_quantity'],
+                'scale' => [
+                    'from_quantity' => (int) $scale['from_quantity'],
+                    'to_quantity' => $scale['to_quantity'],
+                    'discount_percentage' => $percentage,
+                ],
+                'scales' => $activeScales->all(),
             ],
         ];
     }
@@ -735,6 +800,64 @@ class PromotionEngine
                         'progress_message' => 'Esta promoción aplica directamente a este producto.',
                         'missing_quantity' => 0,
                         'is_eligible_now' => true,
+                    ];
+                    break;
+
+                case PromotionType::PRICE_SCALE_PERCENTAGE:
+                    $scales = collect($config['scales'] ?? [])
+                        ->filter(fn ($scale) => filter_var($scale['is_active'] ?? true, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true)
+                        ->map(fn ($scale) => [
+                            'from_quantity' => (int) ($scale['from_quantity'] ?? 0),
+                            'to_quantity' => isset($scale['to_quantity']) && $scale['to_quantity'] !== ''
+                                ? (int) $scale['to_quantity']
+                                : null,
+                            'discount_percentage' => (float) ($scale['discount_percentage'] ?? 0),
+                            'is_active' => true,
+                        ])
+                        ->filter(fn ($scale) => $scale['from_quantity'] > 0 && $scale['discount_percentage'] > 0)
+                        ->sortBy('from_quantity')
+                        ->values();
+
+                    if ($scales->isEmpty()) {
+                        continue 2;
+                    }
+
+                    $currentScale = $scales->first(function ($scale) use ($quantity) {
+                        return $quantity >= $scale['from_quantity']
+                            && ($scale['to_quantity'] === null || $quantity <= $scale['to_quantity']);
+                    });
+
+                    $nextScale = $scales->first(fn ($scale) => $scale['from_quantity'] > $quantity);
+                    $targetScale = $currentScale ?? $nextScale;
+
+                    if (!$targetScale) {
+                        continue 2;
+                    }
+
+                    $fromQuantity = (int) $targetScale['from_quantity'];
+                    $toQuantity = $targetScale['to_quantity'];
+                    $discountPercentage = (float) $targetScale['discount_percentage'];
+                    $isEligibleNow = $quantity >= $fromQuantity && ($toQuantity === null || $quantity <= $toQuantity);
+                    $missing = max($fromQuantity - $quantity, 0);
+                    $range = $toQuantity ? "{$fromQuantity} a {$toQuantity}" : "{$fromQuantity}+";
+                    $nextMissing = $nextScale ? max((int) $nextScale['from_quantity'] - $quantity, 0) : 0;
+
+                    $available[] = [
+                        'id' => $promotion->id,
+                        'type' => $promotion->type->value,
+                        'name' => $promotion->name,
+                        'message' => "{$discountPercentage}% de descuento de {$range} pieza(s)",
+                        'progress_message' => match (true) {
+                            $isEligibleNow && (bool) $nextScale => "Ya cumples esta escala. Agrega {$nextMissing} pieza(s) más para subir a {$nextScale['discount_percentage']}% de descuento.",
+                            $isEligibleNow => 'Ya estás en la escala más alta disponible.',
+                            default => "Agrega {$missing} pieza(s) más para activar esta escala.",
+                        },
+                        'missing_quantity' => $missing,
+                        'next_missing_quantity' => $nextMissing,
+                        'is_eligible_now' => $isEligibleNow,
+                        'current_scale' => $currentScale,
+                        'next_scale' => $nextScale,
+                        'scales' => $scales->all(),
                     ];
                     break;
 

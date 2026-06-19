@@ -39,6 +39,11 @@ class CheckoutPreviewService
             'items_count' => (float) $cart->items_count,
             'items' => $checkoutItems,
             'promotions_applied' => $this->buildPromotionsApplied($items),
+            'coupon' => data_get($cart->metadata, 'coupon'),
+            'loyalty' => data_get($cart->metadata, 'loyalty', [
+                'first_purchase_discount' => null,
+                'cashback' => null,
+            ]),
             'invoice_preview' => [
                 'document_type' => 'checkout_preview',
                 'currency' => $cart->currency,
@@ -87,6 +92,19 @@ class CheckoutPreviewService
                     'code' => 'invalid_price',
                     'cart_item_id' => $item->id,
                     'message' => "El producto {$item->name_snapshot} no tiene precio válido.",
+                ];
+            }
+
+            $stock = $this->stockPayload($item);
+
+            if (! $stock['is_valid']) {
+                $blockers[] = [
+                    'code' => 'insufficient_stock',
+                    'cart_item_id' => $item->id,
+                    'product_id' => $item->product_id,
+                    'available_stock' => $stock['available_stock'],
+                    'requested_quantity' => $stock['requested_quantity'],
+                    'message' => $stock['message'] ?? "El producto {$item->name_snapshot} no tiene inventario suficiente.",
                 ];
             }
         }
@@ -191,6 +209,7 @@ class CheckoutPreviewService
             'taxable_base' => (float) data_get($item->metadata, 'tax.taxable_base', 0),
             'tax' => (float) data_get($item->metadata, 'tax.tax_amount', 0),
             'taxes' => data_get($item->metadata, 'tax.taxes', []),
+            'stock' => $this->stockPayload($item),
             'total' => $lineTotal,
             'promotion' => $item->promotion_id ? [
                 'id' => (int) $item->promotion_id,
@@ -218,6 +237,35 @@ class CheckoutPreviewService
                     'total' => $giftLineTotal,
                 ],
             ],
+        ];
+    }
+
+    protected function stockPayload(CartItem $item): array
+    {
+        $stock = $item->product?->stock;
+        $requestedQuantity = (float) $item->quantity;
+
+        if ($stock === null) {
+            return [
+                'is_tracked' => false,
+                'is_valid' => true,
+                'available_stock' => null,
+                'requested_quantity' => $requestedQuantity,
+                'message' => null,
+            ];
+        }
+
+        $availableStock = (float) $stock;
+        $isValid = $availableStock > 0 && $requestedQuantity <= $availableStock;
+
+        return [
+            'is_tracked' => true,
+            'is_valid' => $isValid,
+            'available_stock' => $availableStock,
+            'requested_quantity' => $requestedQuantity,
+            'message' => $isValid
+                ? ($availableStock < 5 ? 'Hay pocas piezas disponibles.' : null)
+                : ($availableStock <= 0 ? 'Producto sin inventario disponible.' : "Solo hay {$availableStock} pieza(s) disponibles."),
         ];
     }
 
@@ -294,6 +342,11 @@ class CheckoutPreviewService
             ]),
             'shipping' => 0.0,
             'gift_accounting_total' => $giftLineTotal,
+            'loyalty' => data_get($cart->metadata, 'loyalty', [
+                'first_purchase_discount' => null,
+                'cashback' => null,
+            ]),
+            'coupon' => data_get($cart->metadata, 'coupon'),
             'total' => round((float) $cart->total_snapshot, 2),
             'amount_due' => round((float) $cart->total_snapshot, 2),
         ];

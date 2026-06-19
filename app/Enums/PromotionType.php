@@ -12,6 +12,7 @@ enum PromotionType: string
     case BUY_SKU_GET_GIFT_ITEM = 'buy_sku_get_gift_item';
     case BRAND_AMOUNT_CHOOSE_GIFT_ITEM = 'brand_amount_choose_gift_item';
     case BRAND_AMOUNT_GET_PRODUCT = 'brand_amount_get_product';
+    case PRICE_SCALE_PERCENTAGE = 'price_scale_percentage';
 
     public function label(): string
     {
@@ -24,6 +25,7 @@ enum PromotionType: string
             self::BUY_SKU_GET_GIFT_ITEM => 'Compra SKU y recibe regalo',
             self::BRAND_AMOUNT_CHOOSE_GIFT_ITEM => 'Monto por marca y elige regalo',
             self::BRAND_AMOUNT_GET_PRODUCT => 'Monto por marca y recibe SKU',
+            self::PRICE_SCALE_PERCENTAGE => 'Escalas de precio por mayoreo',
         };
     }
 }

@@ -15,11 +15,6 @@ use Illuminate\Support\Facades\DB;
 
 class ProductController extends Controller
 {
-    public function __construct(
-        protected ProductPriceService $productPriceService
-    ) {
-    }
-
     public function index(Request $request): JsonResponse
     {
         $perPage = max(1, (int) $request->integer('per_page', 24));
@@ -106,11 +101,11 @@ class ProductController extends Controller
 
         switch ($sort) {
             case 'price_asc':
-                $this->orderByResolvedPrice($query, $user, 'asc');
+                $query->orderBy('default_price', 'asc');
                 break;
 
             case 'price_desc':
-                $this->orderByResolvedPrice($query, $user, 'desc');
+                $query->orderBy('default_price', 'desc');
                 break;
 
             case 'name_asc':
@@ -123,13 +118,12 @@ class ProductController extends Controller
 
             case 'relevant':
             default:
-                $query->latest('id');
+                $query->orderBy('name', 'asc')->orderBy('id', 'asc');
                 break;
         }
 
         $products = $query->paginate($perPage)->appends($request->query());
 
-        $this->productPriceService->decorateProducts($products->getCollection(), $user);
         $products->getCollection()->transform(fn (Product $product) => $this->formatProduct($product));
 
         return response()->json([
@@ -150,15 +144,25 @@ class ProductController extends Controller
     {
         $user = $this->currentUser($request);
         $userId = $user ? (int) $user->id : null;
-        $productIds = $userId ? $this->recentPurchasedProductIds($userId) : collect();
+        $limit = max(1, min((int) $request->integer('limit', 10), 24));
+        $productIds = $userId ? $this->recentPurchasedProductIds($userId, $limit) : collect();
         $source = $productIds->isNotEmpty() ? 'recent_purchases' : 'random';
 
-        if ($productIds->count() < 10) {
+        if ($productIds->isEmpty()) {
+            $contextTerms = $this->homeContextTerms($request);
+
+            if ($contextTerms->isNotEmpty()) {
+                $productIds = $this->relatedProductIdsFromTerms($contextTerms, $limit);
+                $source = $productIds->isNotEmpty() ? 'search_context' : 'random';
+            }
+        }
+
+        if ($productIds->count() < $limit) {
             $randomProductIds = Product::query()
                 ->where('is_active', true)
                 ->whereNotIn('id', $productIds)
                 ->inRandomOrder()
-                ->limit(10 - $productIds->count())
+                ->limit($limit - $productIds->count())
                 ->pluck('id');
 
             $productIds = $productIds->merge($randomProductIds)->values();
@@ -166,22 +170,24 @@ class ProductController extends Controller
 
         $products = $this->productListQuery($userId)
             ->whereIn('id', $productIds)
+            ->where('is_active', true)
             ->get()
             ->sortBy(fn (Product $product) => $productIds->search($product->id))
             ->values();
 
-        $this->productPriceService->decorateProducts($products, $user);
         $products = $products->map(fn (Product $product) => $this->formatProduct($product));
 
         return response()->json([
             'ok' => true,
-            'message' => $source === 'recent_purchases'
-                ? 'Últimos productos comprados obtenidos correctamente.'
-                : 'Productos aleatorios obtenidos correctamente.',
+            'message' => match ($source) {
+                'recent_purchases' => 'Últimos productos comprados obtenidos correctamente.',
+                'search_context' => 'Productos relacionados con el contexto de búsqueda obtenidos correctamente.',
+                default => 'Productos aleatorios obtenidos correctamente.',
+            },
             'data' => $products,
             'meta' => [
                 'source' => $source,
-                'limit' => 10,
+                'limit' => $limit,
                 'total' => $products->count(),
             ],
         ]);
@@ -208,8 +214,6 @@ class ProductController extends Controller
                 'message' => 'Product not found.',
             ], 404);
         }
-
-        $this->productPriceService->decorateProducts(collect([$product]), $user);
 
         return response()->json([
             'ok' => true,
@@ -248,7 +252,7 @@ class ProductController extends Controller
             });
     }
 
-    protected function recentPurchasedProductIds(int $userId)
+    protected function recentPurchasedProductIds(int $userId, int $limit = 10)
     {
         return DB::table('cart_items')
             ->join('carts', 'cart_items.cart_id', '=', 'carts.id')
@@ -259,18 +263,68 @@ class ProductController extends Controller
             ->selectRaw('MAX(COALESCE(carts.converted_at, carts.updated_at)) as last_purchased_at')
             ->groupBy('cart_items.product_id')
             ->orderByDesc('last_purchased_at')
-            ->limit(10)
+            ->limit($limit)
             ->pluck('cart_items.product_id');
+    }
+
+    protected function homeContextTerms(Request $request)
+    {
+        $terms = $request->input('search_terms', []);
+
+        if (is_string($terms)) {
+            $terms = preg_split('/[,|]/', $terms) ?: [];
+        }
+
+        if (!is_array($terms)) {
+            return collect();
+        }
+
+        return collect($terms)
+            ->map(fn ($term) => preg_replace('/\s+/', ' ', trim((string) $term)))
+            ->filter(fn ($term) => filled($term) && mb_strlen($term) >= 2)
+            ->unique()
+            ->take(5)
+            ->values();
+    }
+
+    protected function relatedProductIdsFromTerms($terms, int $limit)
+    {
+        $query = Product::query()
+            ->where('is_active', true)
+            ->where(function ($subQuery) use ($terms) {
+                foreach ($terms as $term) {
+                    $subQuery->orWhere('name', 'like', "%{$term}%")
+                        ->orWhere('description', 'like', "%{$term}%")
+                        ->orWhere('short_description', 'like', "%{$term}%")
+                        ->orWhere('brand', 'like', "%{$term}%")
+                        ->orWhere('keyword', 'like', "%{$term}%")
+                        ->orWhere('sku', 'like', "%{$term}%")
+                        ->orWhereHas('category', function ($categoryQuery) use ($term) {
+                            $categoryQuery->where('name', 'like', "%{$term}%");
+                        })
+                        ->orWhereHas('family', function ($familyQuery) use ($term) {
+                            $familyQuery->where('name', 'like', "%{$term}%");
+                        });
+                }
+            })
+            ->inRandomOrder()
+            ->limit($limit);
+
+        return $query->pluck('id');
     }
 
     protected function formatProduct(Product $product): array
     {
-        $price = $product->getAttribute('current_price') !== null
-            ? (float) $product->getAttribute('current_price')
-            : (float) $product->default_price;
+        $price = (float) $product->default_price;
 
         $activePromotions = $product->promotions
             ->map(fn (Promotion $promotion) => $this->formatProductPromotion($promotion, $price))
+            ->values();
+        $priceScales = $activePromotions
+            ->where('type', PromotionType::PRICE_SCALE_PERCENTAGE->value)
+            ->flatMap(fn ($promotion) => data_get($promotion, 'config.scales', []))
+            ->filter(fn ($scale) => filter_var($scale['is_active'] ?? true, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true)
+            ->sortBy('from_quantity')
             ->values();
 
         return [
@@ -304,11 +358,14 @@ class ProductController extends Controller
             'image_url' => $product->image_url,
             'default_price' => $price,
             'base_default_price' => (float) $product->default_price,
+            'stock' => $product->stock !== null ? (float) $product->stock : null,
+            'stock_status' => $this->stockStatus($product),
+            'stock_message' => $this->stockMessage($product),
             'price_info' => [
-                'precio_empresa_id' => $product->getAttribute('price_company_id') ?? ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
-                'requested_precio_empresa_id' => $product->getAttribute('requested_price_company_id') ?? ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
-                'is_default_price_list' => (bool) ($product->getAttribute('is_default_price_list') ?? true),
-                'source' => $product->getAttribute('price_source') ?? 'precios_articulos_default_missing',
+                'precio_empresa_id' => ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
+                'requested_precio_empresa_id' => ProductPriceService::DEFAULT_PRICE_COMPANY_ID,
+                'is_default_price_list' => true,
+                'source' => 'products.default_price',
             ],
             'sku' => $product->sku,
             'is_active' => (bool) $product->is_active,
@@ -319,6 +376,7 @@ class ProductController extends Controller
             'has_active_promotions' => $activePromotions->isNotEmpty(),
             'active_promotions_count' => $activePromotions->count(),
             'active_promotions' => $activePromotions,
+            'price_scales' => $priceScales,
             ...($product->relationLoaded('activeGalleryItems') ? [
                 'gallery' => $product->activeGalleryItems
                     ->map(fn ($item) => $this->formatGalleryItem($item))
@@ -383,6 +441,36 @@ class ProductController extends Controller
             'fecha_hora_ult_modif' => $product->fecha_hora_ult_modif?->toJSON(),
             'usuario_aut_modif' => $product->usuario_aut_modif,
         ];
+    }
+
+    protected function stockStatus(Product $product): string
+    {
+        if ($product->stock === null) {
+            return 'untracked';
+        }
+
+        if ((float) $product->stock <= 0) {
+            return 'out_of_stock';
+        }
+
+        if ((float) $product->stock < 5) {
+            return 'low_stock';
+        }
+
+        return 'in_stock';
+    }
+
+    protected function stockMessage(Product $product): ?string
+    {
+        if ($product->stock !== null && (float) $product->stock > 0 && (float) $product->stock < 5) {
+            return 'Hay pocas piezas disponibles.';
+        }
+
+        if ($product->stock !== null && (float) $product->stock <= 0) {
+            return 'Producto sin inventario disponible.';
+        }
+
+        return null;
     }
 
     protected function formatGalleryItem($item): array
@@ -573,24 +661,29 @@ class ProductController extends Controller
                 number_format((float) data_get($config, 'minimum_amount', 0), 2),
                 (string) data_get($config, 'brand', 'la marca')
             ),
+            PromotionType::PRICE_SCALE_PERCENTAGE => $this->priceScalePromotionMessage($promotion),
         };
     }
 
-    protected function orderByResolvedPrice($query, ?User $user, string $direction): void
+    protected function priceScalePromotionMessage(Promotion $promotion): string
     {
-        $direction = strtolower($direction) === 'desc' ? 'desc' : 'asc';
-        $priceCompanyId = $this->productPriceService->priceCompanyIdForUser($user);
-        $defaultPriceCompanyId = ProductPriceService::DEFAULT_PRICE_COMPANY_ID;
-        $priceExpression = <<<'SQL'
-COALESCE(
-    (SELECT NULLIF(pa.precio, 0) FROM precios_articulos pa WHERE pa.product_id = products.id AND pa.precio_empresa_id = ? ORDER BY pa.id DESC LIMIT 1),
-    (SELECT pad.precio FROM precios_articulos pad WHERE pad.product_id = products.id AND pad.precio_empresa_id = ? ORDER BY pad.id DESC LIMIT 1),
-    0
-)
-SQL;
+        $firstScale = collect(data_get($promotion->config, 'scales', []))
+            ->filter(fn ($scale) => filter_var($scale['is_active'] ?? true, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true)
+            ->sortBy('from_quantity')
+            ->first();
 
-        $query
-            ->orderByRaw($priceExpression . ' ' . $direction, [$priceCompanyId, $defaultPriceCompanyId])
-            ->orderBy('name', 'asc');
+        if (!$firstScale) {
+            return 'Descuento por escala de mayoreo';
+        }
+
+        $fromQuantity = (int) ($firstScale['from_quantity'] ?? 0);
+        $toQuantity = isset($firstScale['to_quantity']) && $firstScale['to_quantity'] !== ''
+            ? (int) $firstScale['to_quantity']
+            : null;
+        $discountPercentage = (float) ($firstScale['discount_percentage'] ?? 0);
+        $range = $toQuantity ? "{$fromQuantity} a {$toQuantity}" : "{$fromQuantity}+";
+
+        return "{$discountPercentage}% de descuento de {$range} pieza(s)";
     }
+
 }

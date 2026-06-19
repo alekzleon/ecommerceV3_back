@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\CashbackTransaction;
 use App\Models\Order;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -128,6 +129,12 @@ class OrderController extends Controller
 
         $order->update($validated);
 
+        if ($order->payment_status === Order::PAYMENT_PAID) {
+            $this->updateCashbackTransactions($order, CashbackTransaction::STATUS_AVAILABLE);
+        } elseif (in_array($order->status, [Order::STATUS_CANCELLED, Order::STATUS_PAYMENT_FAILED], true)) {
+            $this->updateCashbackTransactions($order, CashbackTransaction::STATUS_CANCELLED);
+        }
+
         return response()->json([
             'ok' => true,
             'message' => 'Pedido actualizado correctamente.',
@@ -151,6 +158,8 @@ class OrderController extends Controller
                 'cancelled_at' => now()->toISOString(),
             ]),
         ]);
+
+        $this->updateCashbackTransactions($order, CashbackTransaction::STATUS_CANCELLED);
 
         return response()->json([
             'ok' => true,
@@ -262,5 +271,13 @@ class OrderController extends Controller
             'breakdown' => data_get($item->metadata, 'breakdown'),
             'metadata' => $item->metadata,
         ];
+    }
+
+    protected function updateCashbackTransactions(Order $order, string $status): void
+    {
+        CashbackTransaction::query()
+            ->where('order_id', $order->id)
+            ->where('status', CashbackTransaction::STATUS_PENDING)
+            ->update(['status' => $status]);
     }
 }

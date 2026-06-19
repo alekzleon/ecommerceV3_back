@@ -49,7 +49,8 @@ class ProductController extends Controller
                     $query->where('processed', $processed);
                 }
             })
-            ->orderByDesc('id')
+            ->orderBy('name')
+            ->orderBy('id')
             ->paginate($perPage);
 
         return response()->json([

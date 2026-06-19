@@ -11,10 +11,14 @@ use App\Http\Controllers\Api\V1\SearchSuggestionController;
 use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\PromotionController as CustomerPromotionController;
 use App\Http\Controllers\Api\V1\BannerController;
+use App\Http\Controllers\Api\V1\BrandBannerController;
 use App\Http\Controllers\Api\V1\CheckoutController;
 use App\Http\Controllers\Api\V1\ContactController;
+use App\Http\Controllers\Api\V1\ContactFaqController;
 use App\Http\Controllers\Api\V1\ContactLeadController;
+use App\Http\Controllers\Api\V1\EcommerceSettingController;
 use App\Http\Controllers\Api\V1\StripeWebhookController;
+use App\Http\Controllers\Api\V1\SiteSettingController;
 use App\Http\Controllers\Api\V1\Account\AddressController;
 use App\Http\Controllers\Api\V1\Account\FavoriteController;
 use App\Http\Controllers\Api\V1\Account\CustomerPfrProfileController;
@@ -23,6 +27,7 @@ use App\Http\Resources\Account\AddressResource;
 
 // Controllers admin
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
+use App\Http\Controllers\Api\V1\Admin\EcommerceSettingController as AdminEcommerceSettingController;
 use App\Http\Controllers\Api\V1\Admin\UserController;
 use App\Http\Controllers\Api\V1\Admin\RoleController;
 use App\Http\Controllers\Api\V1\Admin\AdminProductController;
@@ -30,6 +35,8 @@ use App\Http\Controllers\Api\V1\Admin\OrderController;
 use App\Http\Controllers\Api\V1\Admin\CustomerController;
 use App\Http\Controllers\Api\V1\Admin\CreditController;
 use App\Http\Controllers\Api\V1\Admin\CollectionController;
+use App\Http\Controllers\Api\V1\Admin\ContactFaqController as AdminContactFaqController;
+use App\Http\Controllers\Api\V1\Admin\CouponController as AdminCouponController;
 use App\Http\Controllers\Api\V1\Admin\MarketingController;
 use App\Http\Controllers\Api\V1\Admin\PromotionController;
 use App\Http\Controllers\Api\V1\Admin\LogController;
@@ -37,11 +44,13 @@ use App\Http\Controllers\Api\V1\Admin\SyncController;
 use App\Http\Controllers\Api\V1\Admin\SettingController;
 use App\Http\Controllers\Api\V1\Admin\AdminNavigationController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdProductController;
+use App\Http\Controllers\Api\V1\Admin\ProductPriceScaleController;
 use App\Http\Controllers\Api\V1\Admin\ProductGalleryItemController;
 use App\Http\Controllers\Api\V1\Admin\ProductVariantController;
 use App\Http\Controllers\Api\V1\Admin\VariantAttributeController;
 use App\Http\Controllers\Api\V1\Admin\VariantAttributeValueController;
 use App\Http\Controllers\Api\V1\Admin\BannerController as AdminBannerController;
+use App\Http\Controllers\Api\V1\Admin\BrandBannerController as AdminBrandBannerController;
 use App\Http\Controllers\Api\V1\Admin\MonthlyPromotionController as AdminMonthlyPromotionController;
 use App\Http\Controllers\Api\V1\Admin\GiftItemController;
 
@@ -66,6 +75,7 @@ Route::prefix('v1')->group(function () {
     | Auth pública
     |--------------------------------------------------------------------------
     */
+    Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
 
     /*
@@ -80,7 +90,14 @@ Route::prefix('v1')->group(function () {
     Route::get('/catalog/sidebar', [CatalogController::class, 'sidebar']);
     Route::get('/search/suggestions', [SearchSuggestionController::class, 'index']);
     Route::get('/banners', [BannerController::class, 'index']);
+    Route::get('/brand-banners', [BrandBannerController::class, 'index']);
     Route::get('/monthly-promotions', [MonthlyPromotionController::class, 'index']);
+    Route::get('/settings', [SiteSettingController::class, 'show']);
+    Route::get('/ecommerce-settings/nav-title', [EcommerceSettingController::class, 'navTitle']);
+    Route::get('/ecommerce-settings/general-logo', [EcommerceSettingController::class, 'generalLogo']);
+    Route::get('/ecommerce-settings/contact-faq-image', [EcommerceSettingController::class, 'contactFaqImage']);
+    Route::get('/ecommerce-settings/contact-map-url', [EcommerceSettingController::class, 'contactMapUrl']);
+    Route::get('/contact-faqs', [ContactFaqController::class, 'index']);
     Route::post('/contact', [ContactController::class, 'store']);
     Route::post('/contact-leads', [ContactLeadController::class, 'store']);
 
@@ -132,6 +149,10 @@ Route::prefix('v1')->group(function () {
         Route::patch('/cart/items/{item}', [CartController::class, 'updateItem']);
         Route::delete('/cart/items/{item}', [CartController::class, 'destroyItem']);
         Route::delete('/cart/items', [CartController::class, 'clear']);
+        Route::post('/cart/cashback/apply', [CartController::class, 'applyCashback']);
+        Route::delete('/cart/cashback', [CartController::class, 'clearCashback']);
+        Route::post('/cart/coupon', [CartController::class, 'applyCoupon']);
+        Route::delete('/cart/coupon', [CartController::class, 'clearCoupon']);
         Route::post('/cart/promotions/{promotion}/select-gift', [CartController::class, 'selectPromotionGift']);
         Route::delete('/cart/promotions/{promotion}/select-gift', [CartController::class, 'clearPromotionGift']);
         Route::post('/cart/promotions/{promotion}/add-gift-product', [CartController::class, 'addPromotionGiftProduct']);
@@ -299,6 +320,18 @@ Route::prefix('v1')->group(function () {
                 Route::patch('products/{product}/status', [AdProductController::class, 'updateStatus'])
                     ->middleware('module:productos');
 
+                Route::get('products/{product}/price-scales', [ProductPriceScaleController::class, 'show'])
+                    ->middleware('module:productos');
+
+                Route::put('products/{product}/price-scales', [ProductPriceScaleController::class, 'update'])
+                    ->middleware('module:productos');
+
+                Route::patch('products/{product}/price-scales', [ProductPriceScaleController::class, 'update'])
+                    ->middleware('module:productos');
+
+                Route::delete('products/{product}/price-scales', [ProductPriceScaleController::class, 'destroy'])
+                    ->middleware('module:productos');
+
                 Route::get('products/{product}/gallery', [ProductGalleryItemController::class, 'index'])
                     ->middleware('module:productos');
 
@@ -391,6 +424,18 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('marketing', MarketingController::class)
                     ->middleware('module:marketing');
 
+                Route::get('coupons/form-options', [AdminCouponController::class, 'formOptions'])
+                    ->middleware('module:promociones');
+
+                Route::patch('coupons/{coupon}/toggle', [AdminCouponController::class, 'toggle'])
+                    ->middleware('module:promociones');
+
+                Route::post('coupons/{coupon}/send', [AdminCouponController::class, 'send'])
+                    ->middleware('module:promociones');
+
+                Route::apiResource('coupons', AdminCouponController::class)
+                    ->middleware('module:promociones');
+
                 Route::patch('banners/{banner}/toggle', [AdminBannerController::class, 'toggle'])
                     ->middleware('module:marketing');
 
@@ -398,6 +443,19 @@ Route::prefix('v1')->group(function () {
                     ->middleware('module:marketing');
 
                 Route::apiResource('banners', AdminBannerController::class)
+                    ->middleware('module:marketing');
+
+                Route::patch('brand-banners/{brandBanner}/toggle', [AdminBrandBannerController::class, 'toggle'])
+                    ->middleware('module:marketing');
+
+                Route::post('brand-banners/reorder', [AdminBrandBannerController::class, 'reorder'])
+                    ->middleware('module:marketing');
+
+                Route::post('brand-banners/{brandBanner}', [AdminBrandBannerController::class, 'update'])
+                    ->middleware('module:marketing');
+
+                Route::apiResource('brand-banners', AdminBrandBannerController::class)
+                    ->parameters(['brand-banners' => 'brandBanner'])
                     ->middleware('module:marketing');
 
                 Route::patch('monthly-promotions/{monthlyPromotion}/toggle', [AdminMonthlyPromotionController::class, 'toggle'])
@@ -511,7 +569,69 @@ Route::prefix('v1')->group(function () {
                 | Configuración
                 |--------------------------------------------------------------------------
                 */
+                Route::get('settings', [SettingController::class, 'index'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::post('settings', [SettingController::class, 'store'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/nav-title', [AdminEcommerceSettingController::class, 'navTitle'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/nav-title', [AdminEcommerceSettingController::class, 'updateNavTitle'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/nav-title', [AdminEcommerceSettingController::class, 'updateNavTitle'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/general-logo', [AdminEcommerceSettingController::class, 'generalLogo'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::post('ecommerce-settings/general-logo', [AdminEcommerceSettingController::class, 'updateGeneralLogo'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/general-logo', [AdminEcommerceSettingController::class, 'updateGeneralLogo'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/general-logo', [AdminEcommerceSettingController::class, 'updateGeneralLogo'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/contact-faq-image', [AdminEcommerceSettingController::class, 'contactFaqImage'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::post('ecommerce-settings/contact-faq-image', [AdminEcommerceSettingController::class, 'updateContactFaqImage'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/contact-faq-image', [AdminEcommerceSettingController::class, 'updateContactFaqImage'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/contact-faq-image', [AdminEcommerceSettingController::class, 'updateContactFaqImage'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/contact-map-url', [AdminEcommerceSettingController::class, 'contactMapUrl'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/contact-map-url', [AdminEcommerceSettingController::class, 'updateContactMapUrl'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/contact-map-url', [AdminEcommerceSettingController::class, 'updateContactMapUrl'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('contact-faqs/{contactFaq}/toggle', [AdminContactFaqController::class, 'toggle'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::post('contact-faqs/reorder', [AdminContactFaqController::class, 'reorder'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::post('contact-faqs/{contactFaq}', [AdminContactFaqController::class, 'update'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::apiResource('contact-faqs', AdminContactFaqController::class)
+                    ->parameters(['contact-faqs' => 'contactFaq'])
+                    ->middleware('module:configuracion_ecommerce');
+
                 Route::apiResource('settings', SettingController::class)
+                    ->except(['index', 'store'])
                     ->middleware('module:configuracion_ecommerce');
             });
     });

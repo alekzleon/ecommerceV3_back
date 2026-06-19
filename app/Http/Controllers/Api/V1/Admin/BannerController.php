@@ -74,7 +74,7 @@ class BannerController extends Controller
         $data['media_disk'] = 'public';
         $data['media_path'] = $file->store('banners', 'public');
 
-        unset($data['media']);
+        unset($data['media'], $data['name']);
 
         if (!isset($data['sort_order'])) {
             $data['sort_order'] = ((int) Banner::query()->max('sort_order')) + 1;
@@ -113,7 +113,7 @@ class BannerController extends Controller
             $data['media_path'] = $file->store('banners', 'public');
         }
 
-        unset($data['media']);
+        unset($data['media'], $data['name']);
 
         $banner->update($data);
 

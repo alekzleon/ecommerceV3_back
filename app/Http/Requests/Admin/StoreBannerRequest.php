@@ -15,8 +15,11 @@ class StoreBannerRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        $title = $this->has('title') ? $this->input('title') : $this->input('name');
+
         $this->merge([
-            'title' => $this->filled('title') ? trim((string) $this->title) : null,
+            'title' => filled($title) ? trim((string) $title) : null,
+            'name' => $this->filled('name') ? trim((string) $this->name) : null,
             'subtitle' => $this->filled('subtitle') ? trim((string) $this->subtitle) : null,
             'description' => $this->filled('description') ? trim((string) $this->description) : null,
             'link_url' => $this->filled('link_url') ? trim((string) $this->link_url) : null,
@@ -30,6 +33,7 @@ class StoreBannerRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'name' => ['nullable', 'string', 'max:255'],
             'title' => ['nullable', 'string', 'max:255'],
             'subtitle' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],

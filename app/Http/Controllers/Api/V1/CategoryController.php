@@ -12,7 +12,7 @@ class CategoryController extends Controller
     {
         $categories = Category::query()
             ->where('is_active', true)
-            ->orderBy('code')
+            ->orderBy('name')
             ->get([
                 'id',
                 'grupo_linea_id',

@@ -70,6 +70,11 @@ class AdminProductResource extends JsonResource
 
             'default_price' => $this->default_price,
             'default_price_number' => $this->default_price !== null ? (float) $this->default_price : null,
+            'stock' => $this->stock !== null ? (float) $this->stock : null,
+            'stock_status' => $this->stock === null ? 'untracked' : ((float) $this->stock <= 0 ? 'out_of_stock' : ((float) $this->stock < 5 ? 'low_stock' : 'in_stock')),
+            'stock_message' => $this->stock !== null && (float) $this->stock > 0 && (float) $this->stock < 5
+                ? 'Hay pocas piezas disponibles.'
+                : null,
 
             'sku' => $this->sku,
             'brand' => $this->brand,

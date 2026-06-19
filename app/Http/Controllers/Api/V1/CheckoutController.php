@@ -261,6 +261,7 @@ class CheckoutController extends Controller
             'stripe_payment_intent_id' => $order->stripe_payment_intent_id,
             'paid_at' => $order->paid_at,
             'promotions_applied' => data_get($order->metadata, 'promotions_applied', []),
+            'coupon' => data_get($order->metadata, 'coupon'),
             'tax_breakdown' => data_get($order->metadata, 'tax_breakdown', []),
             'shipping_address' => $order->shipping_address_snapshot,
             'items' => $order->items->map(fn ($item) => [
@@ -291,6 +292,7 @@ class CheckoutController extends Controller
                 'base_subtotal' => (float) data_get($item->metadata, 'base_subtotal', 0),
                 'promotion' => $item->promotion_id ? [
                     'id' => $item->promotion_id,
+                    'type' => $item->promotion_type,
                     'name' => $item->promotion_name_snapshot,
                     'snapshot' => $item->promotion_snapshot,
                 ] : null,
