@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\AbandonedCartMail;
 use App\Models\Cart;
+use App\Models\EcommerceSetting;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -47,9 +48,12 @@ class SendAbandonedCartEmailJob implements ShouldQueue
             return;
         }
 
+        $settings = EcommerceSetting::abandonedCartSettings();
+        $expiresAt = now()->addHours((int) data_get($settings, 'recovery_link_expires_hours', 48));
+
         $recoverUrl = URL::temporarySignedRoute(
             'cart.recover',
-            now()->addHours(48),
+            $expiresAt,
             ['cart' => $cart->id]
         );
 
@@ -61,5 +65,7 @@ class SendAbandonedCartEmailJob implements ShouldQueue
             'cart_id' => $cart->id,
             'email' => $cart->user->email,
         ]);
+
+        $cart->forceFill(['abandoned_email_sent_at' => now()])->save();
     }
 }

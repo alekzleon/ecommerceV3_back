@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdateAbandonedCartSettingRequest;
 use App\Http\Requests\Admin\UpdateContactFaqImageRequest;
 use App\Http\Requests\Admin\UpdateContactMapUrlRequest;
 use App\Http\Requests\Admin\UpdateGeneralLogoRequest;
+use App\Http\Requests\Admin\UpdateMetaPixelSettingRequest;
 use App\Http\Requests\Admin\UpdateNavTitleSettingRequest;
 use App\Models\EcommerceSetting;
 use App\Models\SiteSetting;
@@ -14,6 +16,31 @@ use Illuminate\Support\Facades\Storage;
 
 class EcommerceSettingController extends Controller
 {
+    public function abandonedCart(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_ABANDONED_CART,
+                'value' => EcommerceSetting::abandonedCartSettings(),
+            ],
+        ]);
+    }
+
+    public function updateAbandonedCart(UpdateAbandonedCartSettingRequest $request): JsonResponse
+    {
+        $setting = EcommerceSetting::setValue(EcommerceSetting::KEY_ABANDONED_CART, $request->validated());
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Configuración de carrito abandonado actualizada correctamente.',
+            'data' => [
+                'key' => $setting->key,
+                'value' => EcommerceSetting::abandonedCartSettings(),
+            ],
+        ]);
+    }
+
     public function navTitle(): JsonResponse
     {
         return response()->json([
@@ -148,6 +175,35 @@ class EcommerceSettingController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Link del mapa de contacto actualizado correctamente.',
+            'data' => [
+                'key' => $setting->key,
+                'value' => $setting->value,
+            ],
+        ]);
+    }
+
+    public function metaPixel(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_META_PIXEL,
+                'value' => EcommerceSetting::getValue(EcommerceSetting::KEY_META_PIXEL, [
+                    'pixel_id' => null,
+                ]),
+            ],
+        ]);
+    }
+
+    public function updateMetaPixel(UpdateMetaPixelSettingRequest $request): JsonResponse
+    {
+        $setting = EcommerceSetting::setValue(EcommerceSetting::KEY_META_PIXEL, [
+            'pixel_id' => $request->validated('pixel_id'),
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Meta Pixel ID actualizado correctamente.',
             'data' => [
                 'key' => $setting->key,
                 'value' => $setting->value,

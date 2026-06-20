@@ -9,6 +9,7 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 use App\Models\Cart;
+use App\Models\SiteSetting;
 
 class AbandonedCartMail extends Mailable
 {
@@ -32,6 +33,7 @@ class AbandonedCartMail extends Mailable
                 'cart' => $this->cart,
                 'user' => $this->cart->user,
                 'recoverUrl' => $this->recoverUrl,
+                'settings' => SiteSetting::current(),
             ]);
     }
 

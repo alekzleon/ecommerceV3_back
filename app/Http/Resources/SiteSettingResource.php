@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\EcommerceSetting;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -32,6 +33,9 @@ class SiteSettingResource extends JsonResource
             ],
             'google_analytics_pixel' => $this->google_analytics_pixel,
             'meta_pixel' => $this->meta_pixel,
+            'meta_pixel_id' => data_get(EcommerceSetting::getValue(EcommerceSetting::KEY_META_PIXEL, [
+                'pixel_id' => null,
+            ]), 'pixel_id'),
             'loyalty' => [
                 'first_purchase_discount_enabled' => (bool) data_get($this->loyalty, 'first_purchase_discount_enabled', false),
                 'first_purchase_discount_percentage' => (float) data_get($this->loyalty, 'first_purchase_discount_percentage', 0),

@@ -166,6 +166,11 @@ class User extends Authenticatable
             ->withTimestamps();
     }
 
+    public function wishlists(): HasMany
+    {
+        return $this->hasMany(Wishlist::class);
+    }
+
     public function scopeActiveClients($query)
     {
         return $query->where('role_id', self::ROLE_CLIENTE)

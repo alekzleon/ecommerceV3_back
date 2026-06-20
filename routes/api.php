@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\V1\SiteSettingController;
 use App\Http\Controllers\Api\V1\Account\AddressController;
 use App\Http\Controllers\Api\V1\Account\FavoriteController;
 use App\Http\Controllers\Api\V1\Account\CustomerPfrProfileController;
+use App\Http\Controllers\Api\V1\Account\WishlistController;
 use App\Http\Controllers\Api\V1\MonthlyPromotionController;
 use App\Http\Resources\Account\AddressResource;
 
@@ -97,6 +98,8 @@ Route::prefix('v1')->group(function () {
     Route::get('/ecommerce-settings/general-logo', [EcommerceSettingController::class, 'generalLogo']);
     Route::get('/ecommerce-settings/contact-faq-image', [EcommerceSettingController::class, 'contactFaqImage']);
     Route::get('/ecommerce-settings/contact-map-url', [EcommerceSettingController::class, 'contactMapUrl']);
+    Route::get('/ecommerce-settings/meta-pixel', [EcommerceSettingController::class, 'metaPixel']);
+    Route::get('/ecommerce-settings/abandoned-cart', [EcommerceSettingController::class, 'abandonedCart']);
     Route::get('/contact-faqs', [ContactFaqController::class, 'index']);
     Route::post('/contact', [ContactController::class, 'store']);
     Route::post('/contact-leads', [ContactLeadController::class, 'store']);
@@ -156,6 +159,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/cart/promotions/{promotion}/select-gift', [CartController::class, 'selectPromotionGift']);
         Route::delete('/cart/promotions/{promotion}/select-gift', [CartController::class, 'clearPromotionGift']);
         Route::post('/cart/promotions/{promotion}/add-gift-product', [CartController::class, 'addPromotionGiftProduct']);
+        Route::post('/cart/abandoned/{cart}/recover', [CartController::class, 'recoverAbandoned']);
 
         /*
         |--------------------------------------------------------------------------
@@ -223,6 +227,10 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('addresses', AddressController::class);
             Route::get('/favorites', [FavoriteController::class, 'index']);
             Route::post('/favorites/toggle', [FavoriteController::class, 'toggle']);
+            Route::get('/wishlists/options', [WishlistController::class, 'options']);
+            Route::post('/wishlists/products', [WishlistController::class, 'addProduct']);
+            Route::delete('/wishlists/{wishlist}/products/{product}', [WishlistController::class, 'removeProduct']);
+            Route::apiResource('wishlists', WishlistController::class);
             Route::get('/customer-pfr-profile', [CustomerPfrProfileController::class, 'show']);
             Route::post('/customer-pfr-profile', [CustomerPfrProfileController::class, 'store']);
 
@@ -615,6 +623,24 @@ Route::prefix('v1')->group(function () {
                     ->middleware('module:configuracion_ecommerce');
 
                 Route::patch('ecommerce-settings/contact-map-url', [AdminEcommerceSettingController::class, 'updateContactMapUrl'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/meta-pixel', [AdminEcommerceSettingController::class, 'metaPixel'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/meta-pixel', [AdminEcommerceSettingController::class, 'updateMetaPixel'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/meta-pixel', [AdminEcommerceSettingController::class, 'updateMetaPixel'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/abandoned-cart', [AdminEcommerceSettingController::class, 'abandonedCart'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/abandoned-cart', [AdminEcommerceSettingController::class, 'updateAbandonedCart'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/abandoned-cart', [AdminEcommerceSettingController::class, 'updateAbandonedCart'])
                     ->middleware('module:configuracion_ecommerce');
 
                 Route::patch('contact-faqs/{contactFaq}/toggle', [AdminContactFaqController::class, 'toggle'])

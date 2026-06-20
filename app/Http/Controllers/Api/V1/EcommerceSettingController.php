@@ -10,6 +10,17 @@ use Illuminate\Support\Facades\Storage;
 
 class EcommerceSettingController extends Controller
 {
+    public function abandonedCart(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_ABANDONED_CART,
+                'value' => EcommerceSetting::abandonedCartSettings(),
+            ],
+        ]);
+    }
+
     public function navTitle(): JsonResponse
     {
         return response()->json([
@@ -58,6 +69,19 @@ class EcommerceSettingController extends Controller
                 'key' => EcommerceSetting::KEY_CONTACT_MAP_URL,
                 'value' => EcommerceSetting::getValue(EcommerceSetting::KEY_CONTACT_MAP_URL, [
                     'url' => null,
+                ]),
+            ],
+        ]);
+    }
+
+    public function metaPixel(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_META_PIXEL,
+                'value' => EcommerceSetting::getValue(EcommerceSetting::KEY_META_PIXEL, [
+                    'pixel_id' => null,
                 ]),
             ],
         ]);

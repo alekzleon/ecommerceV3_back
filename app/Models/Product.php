@@ -190,6 +190,12 @@ class Product extends Model
             ->withTimestamps();
     }
 
+    public function wishlists(): BelongsToMany
+    {
+        return $this->belongsToMany(Wishlist::class, 'wishlist_products')
+            ->withTimestamps();
+    }
+
     protected function imageUrl(): Attribute
     {
         return Attribute::make(

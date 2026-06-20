@@ -9,6 +9,8 @@ class EcommerceSetting extends Model
     public const KEY_NAV_TITLE = 'nav_title';
     public const KEY_CONTACT_FAQ_IMAGE = 'contact_faq_image';
     public const KEY_CONTACT_MAP_URL = 'contact_map_url';
+    public const KEY_META_PIXEL = 'meta_pixel';
+    public const KEY_ABANDONED_CART = 'abandoned_cart';
 
     protected $fillable = [
         'key',
@@ -30,5 +32,20 @@ class EcommerceSetting extends Model
             ['key' => $key],
             ['value' => $value]
         );
+    }
+
+    public static function abandonedCartSettings(): array
+    {
+        $settings = array_merge([
+            'enabled' => true,
+            'abandon_after_minutes' => (int) env('CART_ABANDONED_AFTER_MINUTES', 60),
+            'recovery_link_expires_hours' => 48,
+            'send_email' => true,
+            'send_whatsapp' => true,
+        ], static::getValue(static::KEY_ABANDONED_CART, []));
+
+        $settings['abandon_after_minutes'] = max(60, (int) $settings['abandon_after_minutes']);
+
+        return $settings;
     }
 }

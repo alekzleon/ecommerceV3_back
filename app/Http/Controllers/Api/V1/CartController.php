@@ -9,6 +9,7 @@ use App\Http\Requests\Cart\SelectPromotionGiftRequest;
 use App\Http\Requests\Cart\UpdateCartItemRequest;
 use App\Http\Resources\Cart\CartResource;
 use App\Http\Resources\Cart\CartSummaryResource;
+use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Promotion;
 use App\Models\Product;
@@ -352,6 +353,37 @@ class CartController extends Controller
                     'target_quantity' => $targetQuantity,
                 ],
             ],
+        ]);
+    }
+
+    public function recoverAbandoned(Request $request, Cart $cart): JsonResponse
+    {
+        abort_unless((int) $cart->user_id === (int) $request->user()->id, 403);
+
+        if ($cart->status === 'abandoned') {
+            Cart::query()
+                ->where('user_id', $cart->user_id)
+                ->where('id', '!=', $cart->id)
+                ->where('status', 'active')
+                ->update(['status' => 'archived']);
+
+            $cart->forceFill([
+                'status' => 'active',
+                'recovered_at' => now(),
+                'last_activity_at' => now(),
+            ])->save();
+        }
+
+        $cart = $this->cartService->recalculateCart($cart->fresh([
+            'user',
+            'items.product.category',
+            'items.product.family',
+        ]));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Carrito recuperado correctamente.',
+            'data' => new CartResource($cart),
         ]);
     }
 
