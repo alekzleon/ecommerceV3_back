@@ -93,6 +93,6 @@
         </tr>
     </table>
 
-    <p style="margin-top: 20px;">Puedes revisar tu compra y seguimiento siempre en PideFácil.</p>
+    <p style="margin-top: 20px;">Puedes revisar tu compra y seguimiento siempre en Cloudi Shop.</p>
 </body>
 </html>

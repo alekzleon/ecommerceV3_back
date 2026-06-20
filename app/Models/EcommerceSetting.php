@@ -11,6 +11,7 @@ class EcommerceSetting extends Model
     public const KEY_CONTACT_MAP_URL = 'contact_map_url';
     public const KEY_META_PIXEL = 'meta_pixel';
     public const KEY_ABANDONED_CART = 'abandoned_cart';
+    public const KEY_HOME_BENEFIT_PREFIX = 'home_benefit_';
 
     protected $fillable = [
         'key',
@@ -47,5 +48,29 @@ class EcommerceSetting extends Model
         $settings['abandon_after_minutes'] = max(60, (int) $settings['abandon_after_minutes']);
 
         return $settings;
+    }
+
+    public static function homeBenefitKey(int $benefit): string
+    {
+        return self::KEY_HOME_BENEFIT_PREFIX . $benefit;
+    }
+
+    public static function homeBenefitValue(int $benefit): array
+    {
+        return array_merge([
+            'benefit' => $benefit,
+            'title' => null,
+            'text' => null,
+            'icon_disk' => 'public',
+            'icon_path' => null,
+        ], static::getValue(static::homeBenefitKey($benefit), []));
+    }
+
+    public static function homeBenefits(): array
+    {
+        return collect([1, 2, 3])
+            ->map(fn (int $benefit) => static::homeBenefitValue($benefit))
+            ->values()
+            ->all();
     }
 }

@@ -12,7 +12,7 @@
                     <tr>
                         <td style="padding:24px 28px;background:#111827;color:#ffffff;">
                             <div style="font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#d1d5db;">
-                                {{ $settings->site_title ?? 'PideFacil' }}
+                                {{ $settings->site_title ?? 'Cloudi Shop' }}
                             </div>
                             <h1 style="margin:10px 0 0;font-size:24px;line-height:1.25;">
                                 Tu carrito sigue listo para ti

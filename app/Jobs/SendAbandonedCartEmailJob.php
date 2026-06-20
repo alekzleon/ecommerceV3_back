@@ -51,19 +51,28 @@ class SendAbandonedCartEmailJob implements ShouldQueue
         $settings = EcommerceSetting::abandonedCartSettings();
         $expiresAt = now()->addHours((int) data_get($settings, 'recovery_link_expires_hours', 48));
 
-        $recoverUrl = URL::temporarySignedRoute(
+        $recoverPath = URL::temporarySignedRoute(
             'cart.recover',
             $expiresAt,
-            ['cart' => $cart->id]
+            ['cart' => $cart->id],
+            false
         );
+        $backendRecoverUrl = rtrim((string) config('services.backend.url'), '/') . $recoverPath;
+        $recoverUrl = rtrim((string) config('services.frontend.url'), '/') . '/carrito?' . http_build_query([
+            'cart_id' => $cart->id,
+            'recover_url' => $backendRecoverUrl,
+        ]);
 
-        Mail::to($cart->user->email)->send(
+        $recipient = config('services.testing_recipients.abandoned_cart_email') ?: $cart->user->email;
+
+        Mail::to($recipient)->send(
             new AbandonedCartMail($cart, $recoverUrl)
         );
 
         Log::info('Correo de carrito abandonado enviado.', [
             'cart_id' => $cart->id,
-            'email' => $cart->user->email,
+            'email' => $recipient,
+            'original_email' => $cart->user->email,
         ]);
 
         $cart->forceFill(['abandoned_email_sent_at' => now()])->save();

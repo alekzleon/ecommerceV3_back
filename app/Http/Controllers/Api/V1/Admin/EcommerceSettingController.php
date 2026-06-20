@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\UpdateAbandonedCartSettingRequest;
 use App\Http\Requests\Admin\UpdateContactFaqImageRequest;
 use App\Http\Requests\Admin\UpdateContactMapUrlRequest;
 use App\Http\Requests\Admin\UpdateGeneralLogoRequest;
+use App\Http\Requests\Admin\UpdateHomeBenefitRequest;
 use App\Http\Requests\Admin\UpdateMetaPixelSettingRequest;
 use App\Http\Requests\Admin\UpdateNavTitleSettingRequest;
 use App\Models\EcommerceSetting;
@@ -16,6 +17,77 @@ use Illuminate\Support\Facades\Storage;
 
 class EcommerceSettingController extends Controller
 {
+    public function homeBenefits(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => 'home_benefits',
+                'value' => $this->homeBenefitsValue(),
+            ],
+        ]);
+    }
+
+    public function homeBenefit(int $benefit): JsonResponse
+    {
+        $this->ensureHomeBenefitNumber($benefit);
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::homeBenefitKey($benefit),
+                'value' => $this->homeBenefitValue($benefit),
+            ],
+        ]);
+    }
+
+    public function updateHomeBenefit(UpdateHomeBenefitRequest $request, int $benefit): JsonResponse
+    {
+        $this->ensureHomeBenefitNumber($benefit);
+
+        $current = EcommerceSetting::homeBenefitValue($benefit);
+        $value = array_merge($current, [
+            'benefit' => $benefit,
+        ]);
+        $validated = $request->validated();
+
+        if (array_key_exists('title', $validated)) {
+            $value['title'] = $validated['title'];
+        }
+
+        if (array_key_exists('text', $validated)) {
+            $value['text'] = $validated['text'];
+        }
+
+        $currentPath = data_get($current, 'icon_path');
+        $currentDisk = data_get($current, 'icon_disk', 'public') ?: 'public';
+
+        if ($request->boolean('remove_icon') && $currentPath) {
+            $this->deleteFile($currentPath, $currentDisk);
+            $value['icon_disk'] = 'public';
+            $value['icon_path'] = null;
+        }
+
+        $icon = $request->file('icon') ?: $request->file('icono');
+
+        if ($icon) {
+            $this->deleteFile($currentPath, $currentDisk);
+            $value['icon_disk'] = 'public';
+            $value['icon_path'] = $icon->store('settings/home-benefits', 'public');
+        }
+
+        $setting = EcommerceSetting::setValue(EcommerceSetting::homeBenefitKey($benefit), $value);
+
+        return response()->json([
+            'ok' => true,
+            'message' => "Beneficio {$benefit} actualizado correctamente.",
+            'data' => [
+                'key' => $setting->key,
+                'value' => $this->homeBenefitValue($benefit),
+            ],
+        ]);
+    }
+
     public function abandonedCart(): JsonResponse
     {
         return response()->json([
@@ -226,5 +298,41 @@ class EcommerceSettingController extends Controller
             'image_path' => $path,
             'image_url' => $path ? Storage::disk($disk)->url($path) : null,
         ];
+    }
+
+    protected function homeBenefitsValue(): array
+    {
+        return collect([1, 2, 3])
+            ->map(fn (int $benefit) => $this->homeBenefitValue($benefit))
+            ->values()
+            ->all();
+    }
+
+    protected function homeBenefitValue(int $benefit): array
+    {
+        $value = EcommerceSetting::homeBenefitValue($benefit);
+        $path = data_get($value, 'icon_path');
+        $disk = data_get($value, 'icon_disk', 'public') ?: 'public';
+
+        return [
+            'benefit' => $benefit,
+            'title' => data_get($value, 'title'),
+            'text' => data_get($value, 'text'),
+            'icon_disk' => $disk,
+            'icon_path' => $path,
+            'icon_url' => $path ? Storage::disk($disk)->url($path) : null,
+        ];
+    }
+
+    protected function ensureHomeBenefitNumber(int $benefit): void
+    {
+        abort_unless(in_array($benefit, [1, 2, 3], true), 404, 'El beneficio solicitado no existe.');
+    }
+
+    protected function deleteFile(?string $path, ?string $disk): void
+    {
+        if ($path && Storage::disk($disk ?: 'public')->exists($path)) {
+            Storage::disk($disk ?: 'public')->delete($path);
+        }
     }
 }

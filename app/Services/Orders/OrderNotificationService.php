@@ -102,9 +102,9 @@ class OrderNotificationService
         }
 
         $body = implode("\n", [
-            'Gracias por tu compra en PideFácil.',
+            'Gracias por tu compra en Cloudi Shop.',
             'Tu número de orden es: ' . $order->number,
-            'Puedes revisar el detalle y seguimiento siempre en PideFácil.',
+            'Puedes revisar el detalle y seguimiento siempre en Cloudi Shop.',
         ]);
 
         SendWhatsAppMessageJob::dispatch($to, $body);

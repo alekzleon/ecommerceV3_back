@@ -10,7 +10,7 @@ Route::get('/', function () {
 });
 
 Route::get('/cart/recover/{cart}', [CartRecoveryController::class, 'recover'])
-    ->middleware('signed')
+    ->middleware('signed:relative')
     ->name('cart.recover');
 Route::get('/test-ultramsg', function () {
 

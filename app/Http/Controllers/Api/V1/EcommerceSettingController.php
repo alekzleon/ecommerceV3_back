@@ -10,6 +10,30 @@ use Illuminate\Support\Facades\Storage;
 
 class EcommerceSettingController extends Controller
 {
+    public function homeBenefits(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => 'home_benefits',
+                'value' => $this->homeBenefitsValue(),
+            ],
+        ]);
+    }
+
+    public function homeBenefit(int $benefit): JsonResponse
+    {
+        $this->ensureHomeBenefitNumber($benefit);
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::homeBenefitKey($benefit),
+                'value' => $this->homeBenefitValue($benefit),
+            ],
+        ]);
+    }
+
     public function abandonedCart(): JsonResponse
     {
         return response()->json([
@@ -102,5 +126,34 @@ class EcommerceSettingController extends Controller
             'image_path' => $path,
             'image_url' => $path ? Storage::disk($disk)->url($path) : null,
         ];
+    }
+
+    protected function homeBenefitsValue(): array
+    {
+        return collect([1, 2, 3])
+            ->map(fn (int $benefit) => $this->homeBenefitValue($benefit))
+            ->values()
+            ->all();
+    }
+
+    protected function homeBenefitValue(int $benefit): array
+    {
+        $value = EcommerceSetting::homeBenefitValue($benefit);
+        $path = data_get($value, 'icon_path');
+        $disk = data_get($value, 'icon_disk', 'public') ?: 'public';
+
+        return [
+            'benefit' => $benefit,
+            'title' => data_get($value, 'title'),
+            'text' => data_get($value, 'text'),
+            'icon_disk' => $disk,
+            'icon_path' => $path,
+            'icon_url' => $path ? Storage::disk($disk)->url($path) : null,
+        ];
+    }
+
+    protected function ensureHomeBenefitNumber(int $benefit): void
+    {
+        abort_unless(in_array($benefit, [1, 2, 3], true), 404, 'El beneficio solicitado no existe.');
     }
 }

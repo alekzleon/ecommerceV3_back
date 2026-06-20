@@ -29,6 +29,7 @@ use App\Http\Resources\Account\AddressResource;
 // Controllers admin
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
 use App\Http\Controllers\Api\V1\Admin\EcommerceSettingController as AdminEcommerceSettingController;
+use App\Http\Controllers\Api\V1\Admin\CartController as AdminCartController;
 use App\Http\Controllers\Api\V1\Admin\UserController;
 use App\Http\Controllers\Api\V1\Admin\RoleController;
 use App\Http\Controllers\Api\V1\Admin\AdminProductController;
@@ -64,7 +65,7 @@ Route::prefix('v1_ping')->group(function () {
     Route::get('/ping', function () {
         return response()->json([
             'ok' => true,
-            'message' => 'API Ecommerce Raul funcionando',
+            'message' => 'API Cloudi Shop funcionando',
         ]);
     });
 });
@@ -78,6 +79,8 @@ Route::prefix('v1')->group(function () {
     */
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
     /*
     |--------------------------------------------------------------------------
@@ -100,6 +103,8 @@ Route::prefix('v1')->group(function () {
     Route::get('/ecommerce-settings/contact-map-url', [EcommerceSettingController::class, 'contactMapUrl']);
     Route::get('/ecommerce-settings/meta-pixel', [EcommerceSettingController::class, 'metaPixel']);
     Route::get('/ecommerce-settings/abandoned-cart', [EcommerceSettingController::class, 'abandonedCart']);
+    Route::get('/ecommerce-settings/home-benefits', [EcommerceSettingController::class, 'homeBenefits']);
+    Route::get('/ecommerce-settings/home-benefits/{benefit}', [EcommerceSettingController::class, 'homeBenefit']);
     Route::get('/contact-faqs', [ContactFaqController::class, 'index']);
     Route::post('/contact', [ContactController::class, 'store']);
     Route::post('/contact-leads', [ContactLeadController::class, 'store']);
@@ -281,6 +286,18 @@ Route::prefix('v1')->group(function () {
                 |--------------------------------------------------------------------------
                 */
                 Route::apiResource('orders', OrderController::class)
+                    ->middleware('module:pedidos');
+
+                Route::get('carts', [AdminCartController::class, 'index'])
+                    ->middleware('module:pedidos');
+
+                Route::get('carts/{cart}', [AdminCartController::class, 'show'])
+                    ->middleware('module:pedidos');
+
+                Route::post('carts/{cart}/remind', [AdminCartController::class, 'remind'])
+                    ->middleware('module:pedidos');
+
+                Route::delete('carts/{cart}/items', [AdminCartController::class, 'clear'])
                     ->middleware('module:pedidos');
 
                 Route::get('customers', [CustomerController::class, 'index'])
@@ -641,6 +658,25 @@ Route::prefix('v1')->group(function () {
                     ->middleware('module:configuracion_ecommerce');
 
                 Route::patch('ecommerce-settings/abandoned-cart', [AdminEcommerceSettingController::class, 'updateAbandonedCart'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/home-benefits', [AdminEcommerceSettingController::class, 'homeBenefits'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/home-benefits/{benefit}', [AdminEcommerceSettingController::class, 'homeBenefit'])
+                    ->whereNumber('benefit')
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::post('ecommerce-settings/home-benefits/{benefit}', [AdminEcommerceSettingController::class, 'updateHomeBenefit'])
+                    ->whereNumber('benefit')
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/home-benefits/{benefit}', [AdminEcommerceSettingController::class, 'updateHomeBenefit'])
+                    ->whereNumber('benefit')
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/home-benefits/{benefit}', [AdminEcommerceSettingController::class, 'updateHomeBenefit'])
+                    ->whereNumber('benefit')
                     ->middleware('module:configuracion_ecommerce');
 
                 Route::patch('contact-faqs/{contactFaq}/toggle', [AdminContactFaqController::class, 'toggle'])

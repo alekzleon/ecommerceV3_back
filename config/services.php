@@ -42,8 +42,16 @@ return [
         'timeout' => (int) env('ULTRAMSG_TIMEOUT', 30),
     ],
 
+    'testing_recipients' => [
+        'abandoned_cart_email' => env('TEST_ABANDONED_CART_EMAIL', env('APP_ENV') === 'local' ? 'alekzleon03.aa@gmail.com' : null),
+    ],
+
     'frontend' => [
         'url' => env('FRONTEND_URL', 'http://localhost:5173'),
+    ],
+
+    'backend' => [
+        'url' => env('BACKEND_URL', env('APP_URL', 'http://localhost:8000')),
     ],
 
     'stripe' => [

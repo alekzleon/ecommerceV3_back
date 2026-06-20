@@ -6,14 +6,19 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Api\V1\BaseApiController;
 use App\Http\Requests\Api\ChangePasswordRequest;
+use App\Http\Requests\Api\ForgotPasswordRequest;
 use App\Http\Requests\Api\LoginRequest;
 use App\Http\Requests\Api\RegisterRequest;
+use App\Http\Requests\Api\ResetPasswordRequest;
+use App\Mail\PasswordResetLinkMail;
 use App\Models\CustomerProfile;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends BaseApiController
@@ -210,6 +215,53 @@ class AuthController extends BaseApiController
         return response()->json([
             'ok' => true,
             'message' => 'Sesión cerrada correctamente.',
+        ]);
+    }
+
+    public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
+    {
+        $email = $request->validated('email');
+        $user = User::query()->where('email', $email)->first();
+
+        if ($user) {
+            $token = Password::broker()->createToken($user);
+            $resetUrl = rtrim((string) config('services.frontend.url'), '/') . '/reset-password?' . http_build_query([
+                'email' => $user->email,
+                'token' => $token,
+            ]);
+
+            Mail::to($user->email)->send(new PasswordResetLinkMail($user, $resetUrl));
+        }
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Si el correo existe, enviaremos instrucciones para recuperar la contraseña.',
+        ]);
+    }
+
+    public function resetPassword(ResetPasswordRequest $request): JsonResponse
+    {
+        $status = Password::broker()->reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function (User $user, string $password) {
+                $user->forceFill([
+                    'password' => Hash::make($password),
+                    'must_change_password' => false,
+                ])->save();
+
+                $user->tokens()->delete();
+            }
+        );
+
+        if ($status !== Password::PASSWORD_RESET) {
+            throw ValidationException::withMessages([
+                'token' => ['El token es inválido o expiró.'],
+            ]);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Contraseña actualizada correctamente.',
         ]);
     }
 
