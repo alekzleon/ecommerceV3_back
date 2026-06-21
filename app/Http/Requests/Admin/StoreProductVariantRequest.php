@@ -30,6 +30,8 @@ class StoreProductVariantRequest extends FormRequest
 
     public function rules(): array
     {
+        $requiresAttributeValues = $this->productHasActiveVariantAttributes();
+
         return [
             'sku' => ['required', 'string', 'max:255', Rule::unique('product_variants', 'sku')],
             'name' => ['nullable', 'string', 'max:255'],
@@ -40,7 +42,11 @@ class StoreProductVariantRequest extends FormRequest
             'is_active' => ['nullable', 'boolean'],
             'applies_promotions' => ['nullable', 'boolean'],
             'metadata' => ['nullable', 'array'],
-            'attribute_value_ids' => ['nullable', 'array'],
+            'attribute_value_ids' => [
+                Rule::requiredIf($requiresAttributeValues),
+                'array',
+                $requiresAttributeValues ? 'min:1' : 'nullable',
+            ],
             'attribute_value_ids.*' => ['integer', 'exists:variant_attribute_values,id'],
         ];
     }
@@ -81,5 +87,16 @@ class StoreProductVariantRequest extends FormRequest
                 );
             }
         });
+    }
+
+    protected function productHasActiveVariantAttributes(): bool
+    {
+        $product = $this->route('product');
+
+        if (! is_object($product)) {
+            return false;
+        }
+
+        return $product->variantAttributes()->active()->exists();
     }
 }

@@ -399,10 +399,46 @@ Route::prefix('v1')->group(function () {
                 Route::patch('products/{product}/variants/{variant}/status', [ProductVariantController::class, 'updateStatus'])
                     ->middleware('module:productos');
 
+                Route::get('variant-attributes/catalog', [VariantAttributeController::class, 'catalog'])
+                    ->middleware('module:productos');
+
+                Route::post('variant-attributes/catalog', [VariantAttributeController::class, 'storeCatalog'])
+                    ->middleware('module:productos');
+
+                Route::get('variant-attributes/catalog/{variantAttribute}', [VariantAttributeController::class, 'showCatalog'])
+                    ->middleware('module:productos');
+
+                Route::match(['put', 'patch'], 'variant-attributes/catalog/{variantAttribute}', [VariantAttributeController::class, 'updateCatalog'])
+                    ->middleware('module:productos');
+
+                Route::delete('variant-attributes/catalog/{variantAttribute}', [VariantAttributeController::class, 'destroyCatalog'])
+                    ->middleware('module:productos');
+
+                Route::patch('variant-attributes/catalog/{variantAttribute}/toggle', [VariantAttributeController::class, 'toggleCatalog'])
+                    ->middleware('module:productos');
+
+                Route::get('variant-attributes/catalog/{variantAttribute}/values', [VariantAttributeValueController::class, 'indexCatalog'])
+                    ->middleware('module:productos');
+
+                Route::post('variant-attributes/catalog/{variantAttribute}/values', [VariantAttributeValueController::class, 'storeCatalog'])
+                    ->middleware('module:productos');
+
+                Route::match(['put', 'patch'], 'variant-attributes/catalog/{variantAttribute}/values/{attributeValue}', [VariantAttributeValueController::class, 'updateCatalog'])
+                    ->middleware('module:productos');
+
+                Route::delete('variant-attributes/catalog/{variantAttribute}/values/{attributeValue}', [VariantAttributeValueController::class, 'destroyCatalog'])
+                    ->middleware('module:productos');
+
+                Route::patch('variant-attributes/catalog/{variantAttribute}/values/{attributeValue}/toggle', [VariantAttributeValueController::class, 'toggleCatalog'])
+                    ->middleware('module:productos');
+
                 Route::get('products/{product}/variant-attributes', [VariantAttributeController::class, 'index'])
                     ->middleware('module:productos');
 
                 Route::post('products/{product}/variant-attributes', [VariantAttributeController::class, 'store'])
+                    ->middleware('module:productos');
+
+                Route::post('products/{product}/variant-attributes/import-from-catalog', [VariantAttributeController::class, 'importFromCatalog'])
                     ->middleware('module:productos');
 
                 Route::get('products/{product}/variant-attributes/{variantAttribute}', [VariantAttributeController::class, 'show'])
@@ -420,7 +456,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('products/{product}/variant-attributes/{variantAttribute}/values', [VariantAttributeValueController::class, 'store'])
                     ->middleware('module:productos');
 
-                Route::post('products/{product}/variant-attributes/{variantAttribute}/values/{attributeValue}', [VariantAttributeValueController::class, 'update'])
+                Route::match(['post', 'put', 'patch'], 'products/{product}/variant-attributes/{variantAttribute}/values/{attributeValue}', [VariantAttributeValueController::class, 'update'])
                     ->middleware('module:productos');
 
                 Route::delete('products/{product}/variant-attributes/{variantAttribute}/values/{attributeValue}', [VariantAttributeValueController::class, 'destroy'])

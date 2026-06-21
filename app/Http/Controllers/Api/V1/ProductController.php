@@ -526,23 +526,35 @@ class ProductController extends Controller
 
     protected function formatVariantOptions(Product $product)
     {
+        $usesRealVariants = $product->relationLoaded('activeVariants') && $product->activeVariants->isNotEmpty();
+
         return $product->activeVariantAttributes
-            ->map(function ($attribute) use ($product) {
-                return [
-                    'id' => $attribute->id,
-                    'name' => $attribute->name,
-                    'slug' => $attribute->slug,
-                    'values' => $attribute->activeValues
-                        ->map(fn ($value) => [
+            ->map(function ($attribute) use ($product, $usesRealVariants) {
+                $values = $attribute->activeValues
+                    ->map(function ($value) use ($product, $usesRealVariants) {
+                        $variantIds = $this->variantIdsForAttributeValue($product, (int) $value->id);
+                        $isAvailable = $usesRealVariants ? $variantIds->isNotEmpty() : true;
+
+                        return [
                             'id' => $value->id,
                             'value' => $value->value,
                             'slug' => $value->slug,
                             'metadata' => $value->metadata,
-                            'variant_ids' => $this->variantIdsForAttributeValue($product, (int) $value->id),
-                        ])
-                        ->values(),
+                            'is_available' => $isAvailable,
+                            'variant_ids' => $variantIds,
+                        ];
+                    })
+                    ->filter(fn ($value) => $value['is_available'])
+                    ->values();
+
+                return [
+                    'id' => $attribute->id,
+                    'name' => $attribute->name,
+                    'slug' => $attribute->slug,
+                    'values' => $values,
                 ];
             })
+            ->filter(fn ($attribute) => $attribute['values']->isNotEmpty())
             ->values();
     }
 
@@ -562,24 +574,33 @@ class ProductController extends Controller
 
     protected function formatVariantAttributeValues(Product $product)
     {
+        $usesRealVariants = $product->relationLoaded('activeVariants') && $product->activeVariants->isNotEmpty();
+
         return $product->activeVariantAttributes
-            ->flatMap(function ($attribute) use ($product) {
+            ->flatMap(function ($attribute) use ($product, $usesRealVariants) {
                 return $attribute->activeValues
-                    ->map(fn ($value) => [
-                    'id' => $value->id,
-                    'variant_attribute_id' => $value->variant_attribute_id,
-                    'attribute' => [
-                        'id' => $attribute->id,
-                        'name' => $attribute->name,
-                        'slug' => $attribute->slug,
-                    ],
-                    'value' => $value->value,
-                    'slug' => $value->slug,
-                    'sort_order' => (int) $value->sort_order,
-                    'is_active' => (bool) $value->is_active,
-                    'metadata' => $value->metadata,
-                    'variant_ids' => $this->variantIdsForAttributeValue($product, (int) $value->id),
-                ]);
+                    ->map(function ($value) use ($attribute, $product, $usesRealVariants) {
+                        $variantIds = $this->variantIdsForAttributeValue($product, (int) $value->id);
+                        $isAvailable = $usesRealVariants ? $variantIds->isNotEmpty() : true;
+
+                        return [
+                            'id' => $value->id,
+                            'variant_attribute_id' => $value->variant_attribute_id,
+                            'attribute' => [
+                                'id' => $attribute->id,
+                                'name' => $attribute->name,
+                                'slug' => $attribute->slug,
+                            ],
+                            'value' => $value->value,
+                            'slug' => $value->slug,
+                            'sort_order' => (int) $value->sort_order,
+                            'is_active' => (bool) $value->is_active,
+                            'is_available' => $isAvailable,
+                            'metadata' => $value->metadata,
+                            'variant_ids' => $variantIds,
+                        ];
+                    })
+                    ->filter(fn ($value) => $value['is_available']);
             })
             ->values();
     }

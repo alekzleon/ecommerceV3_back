@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -39,6 +40,20 @@ class StoreVariantAttributeValueRequest extends FormRequest
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'is_active' => ['nullable', 'boolean'],
             'metadata' => ['nullable', 'array'],
+            'image' => ['nullable', 'image', 'max:2048'],
+        ];
+    }
+
+    public function after(): array
+    {
+        return [
+            function (Validator $validator) {
+                $attribute = $this->route('variantAttribute');
+
+                if ($this->hasFile('image') && $attribute?->slug !== 'color') {
+                    $validator->errors()->add('image', 'La imagen solo está permitida para valores del atributo Color.');
+                }
+            },
         ];
     }
 }

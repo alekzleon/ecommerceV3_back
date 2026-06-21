@@ -117,6 +117,8 @@ class OrderService
                         'regular_units' => data_get($item, 'regular_units'),
                         'regular_line_total' => data_get($item, 'regular_line_total'),
                         'price_info' => data_get($item, 'price_info'),
+                        'selected_attribute_value_ids' => data_get($item, 'selected_attribute_value_ids', []),
+                        'selected_attributes' => data_get($item, 'selected_attributes', []),
                         'gift_units' => data_get($item, 'gift_units'),
                         'gift_item_units' => data_get($item, 'gift_item_units'),
                         'gift_items' => data_get($item, 'gift_items', []),

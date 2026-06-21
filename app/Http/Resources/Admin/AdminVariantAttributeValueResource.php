@@ -4,6 +4,7 @@ namespace App\Http\Resources\Admin;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class AdminVariantAttributeValueResource extends JsonResource
 {
@@ -24,8 +25,25 @@ class AdminVariantAttributeValueResource extends JsonResource
             'sort_order' => (int) $this->sort_order,
             'is_active' => (bool) $this->is_active,
             'metadata' => $this->metadata,
+            'color_image' => $this->colorImage(),
             'created_at' => $this->created_at?->toDateTimeString(),
             'updated_at' => $this->updated_at?->toDateTimeString(),
+        ];
+    }
+
+    protected function colorImage(): ?array
+    {
+        $path = data_get($this->metadata, 'image_path');
+        $disk = data_get($this->metadata, 'image_disk', 'public') ?: 'public';
+
+        if (! $path) {
+            return null;
+        }
+
+        return [
+            'disk' => $disk,
+            'path' => $path,
+            'url' => Storage::disk($disk)->url($path),
         ];
     }
 }

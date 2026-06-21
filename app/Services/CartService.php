@@ -13,6 +13,7 @@ use App\Models\ImpuestoArticulo;
 use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\User;
+use App\Models\VariantAttributeValue;
 use App\Services\ProductPriceService;
 use App\Services\Promotions\PromotionEngine;
 use Illuminate\Support\Facades\DB;
@@ -74,9 +75,9 @@ class CartService
         ]);
     }
 
-    public function addItem(User $user, Product $product, float $quantity = 1): Cart
+    public function addItem(User $user, Product $product, float $quantity = 1, array $attributeValueIds = []): Cart
     {
-        return DB::transaction(function () use ($user, $product, $quantity) {
+        return DB::transaction(function () use ($user, $product, $quantity, $attributeValueIds) {
             $cart = $this->getOrCreateActiveCart($user);
 
             $quantity = round((float) $quantity, 2);
@@ -85,11 +86,15 @@ class CartService
                 abort(422, 'La cantidad debe ser mayor a cero.');
             }
 
+            $selectedAttributes = $this->selectedAttributesForProduct($product, $attributeValueIds);
+            $selectionKey = $this->selectedAttributesKey($selectedAttributes);
+
             $item = CartItem::query()
                 ->where('cart_id', $cart->id)
                 ->where('product_id', $product->id)
                 ->where('status', CartItemStatus::ACTIVE->value)
-                ->first();
+                ->get()
+                ->first(fn (CartItem $item) => data_get($item->metadata, 'selected_attributes_key', '') === $selectionKey);
 
             if ($item) {
                 $item->quantity = round((float) $item->quantity + $quantity, 2);
@@ -102,9 +107,10 @@ class CartService
                 ]);
             }
 
-            $this->abortIfInsufficientStock($product, (float) $item->quantity);
+            $requestedProductQuantity = $this->requestedProductQuantity($cart, $product, $item);
+            $this->abortIfInsufficientStock($product, $requestedProductQuantity);
 
-            $this->fillItemSnapshot($item, $product, $user);
+            $this->fillItemSnapshot($item, $product, $user, selectedAttributes: $selectedAttributes);
 
             $item->base_unit_price_snapshot = round((float) $item->price_snapshot, 2);
             $item->final_unit_price_snapshot = round((float) $item->price_snapshot, 2);
@@ -129,6 +135,7 @@ class CartService
                     'product_id' => $product->id,
                     'quantity' => $quantity,
                     'final_quantity' => $item->quantity,
+                    'selected_attributes' => $selectedAttributes,
                 ]
             );
 
@@ -158,7 +165,8 @@ class CartService
             }
 
             if ($item->product) {
-                $this->abortIfInsufficientStock($item->product, $quantity);
+                $requestedProductQuantity = $this->requestedProductQuantity($cart, $item->product, $item, $quantity);
+                $this->abortIfInsufficientStock($item->product, $requestedProductQuantity);
             }
 
             $item->quantity = $quantity;
@@ -555,8 +563,13 @@ class CartService
         ]);
     }
 
-    protected function fillItemSnapshot(CartItem $item, Product $product, ?User $user = null, ?array $pricePayload = null): void
-    {
+    protected function fillItemSnapshot(
+        CartItem $item,
+        Product $product,
+        ?User $user = null,
+        ?array $pricePayload = null,
+        ?array $selectedAttributes = null
+    ): void {
         $pricePayload ??= $this->productPriceService->priceForProduct($product, $user);
         $price = (float) $pricePayload['price'];
 
@@ -574,6 +587,13 @@ class CartService
             'is_default_price_list' => $pricePayload['is_default_price_list'],
             'source' => $pricePayload['source'],
         ];
+
+        if ($selectedAttributes !== null) {
+            $metadata['selected_attributes'] = $selectedAttributes;
+            $metadata['selected_attribute_value_ids'] = collect($selectedAttributes)->pluck('value_id')->values()->all();
+            $metadata['selected_attributes_key'] = $this->selectedAttributesKey($selectedAttributes);
+        }
+
         $item->metadata = $metadata;
     }
 
@@ -619,6 +639,71 @@ class CartService
 
         abort_if((float) $product->stock <= 0, 422, 'Producto sin inventario disponible.');
         abort_if((float) $product->stock < $quantity, 422, "Solo hay {$product->stock} pieza(s) disponibles.");
+    }
+
+    protected function requestedProductQuantity(
+        Cart $cart,
+        Product $product,
+        ?CartItem $currentItem = null,
+        ?float $currentQuantity = null
+    ): float {
+        $currentQuantity ??= $currentItem ? (float) $currentItem->quantity : 0;
+
+        $otherQuantity = $cart->items()
+            ->where('product_id', $product->id)
+            ->where('status', CartItemStatus::ACTIVE->value)
+            ->when($currentItem?->exists, fn ($query) => $query->whereKeyNot($currentItem->id))
+            ->sum('quantity');
+
+        return round((float) $otherQuantity + (float) $currentQuantity, 2);
+    }
+
+    protected function selectedAttributesForProduct(Product $product, array $attributeValueIds): array
+    {
+        $ids = collect($attributeValueIds)
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return [];
+        }
+
+        return VariantAttributeValue::query()
+            ->with('attribute')
+            ->whereIn('id', $ids)
+            ->where('is_active', true)
+            ->whereHas('attribute', fn ($query) => $query
+                ->where('product_id', $product->id)
+                ->where('is_active', true))
+            ->get()
+            ->sortBy(fn (VariantAttributeValue $value) => [
+                (int) $value->attribute?->sort_order,
+                (int) $value->sort_order,
+                (int) $value->id,
+            ])
+            ->map(fn (VariantAttributeValue $value) => [
+                'attribute_id' => $value->variant_attribute_id,
+                'attribute' => $value->attribute?->name,
+                'attribute_slug' => $value->attribute?->slug,
+                'value_id' => $value->id,
+                'value' => $value->value,
+                'value_slug' => $value->slug,
+                'metadata' => $value->metadata,
+            ])
+            ->values()
+            ->all();
+    }
+
+    protected function selectedAttributesKey(array $selectedAttributes): string
+    {
+        return collect($selectedAttributes)
+            ->pluck('value_id')
+            ->map(fn ($id) => (int) $id)
+            ->sort()
+            ->values()
+            ->implode('|');
     }
 
     protected function applyStockSnapshot(CartItem $item): void

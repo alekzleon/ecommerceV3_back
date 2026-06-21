@@ -103,7 +103,8 @@ class CartController extends Controller
         $cart = $this->cartService->addItem(
             user: $request->user(),
             product: $product,
-            quantity: (float) $request->input('quantity')
+            quantity: (float) $request->input('quantity'),
+            attributeValueIds: $request->input('attribute_value_ids', [])
         );
 
         return response()->json([

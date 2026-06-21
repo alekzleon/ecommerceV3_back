@@ -12,8 +12,10 @@ class VariantAttribute extends Model
 {
     protected $fillable = [
         'product_id',
+        'user_id',
         'name',
         'slug',
+        'is_system',
         'sort_order',
         'is_active',
     ];
@@ -21,13 +23,14 @@ class VariantAttribute extends Model
     protected $casts = [
         'sort_order' => 'integer',
         'is_active' => 'boolean',
+        'is_system' => 'boolean',
     ];
 
     protected static function booted(): void
     {
         static::creating(function (VariantAttribute $attribute) {
             if (blank($attribute->slug) && filled($attribute->name)) {
-                $attribute->slug = static::generateUniqueSlug($attribute->name, (int) $attribute->product_id);
+                $attribute->slug = static::generateUniqueSlug($attribute->name, $attribute->product_id ? (int) $attribute->product_id : null);
             }
         });
 
@@ -35,7 +38,7 @@ class VariantAttribute extends Model
             if ($attribute->isDirty('name') && blank($attribute->slug)) {
                 $attribute->slug = static::generateUniqueSlug(
                     $attribute->name,
-                    (int) $attribute->product_id,
+                    $attribute->product_id ? (int) $attribute->product_id : null,
                     $attribute->id
                 );
             }
@@ -45,6 +48,11 @@ class VariantAttribute extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function values(): HasMany
@@ -62,12 +70,17 @@ class VariantAttribute extends Model
         return $query->where('is_active', true);
     }
 
+    public function scopeCatalog(Builder $query): Builder
+    {
+        return $query->whereNull('product_id');
+    }
+
     public function scopeOrdered(Builder $query): Builder
     {
         return $query->orderBy('sort_order')->orderBy('name');
     }
 
-    protected static function generateUniqueSlug(string $name, int $productId, ?int $ignoreId = null): string
+    protected static function generateUniqueSlug(string $name, ?int $productId, ?int $ignoreId = null): string
     {
         $baseSlug = Str::slug($name) ?: 'atributo';
         $slug = $baseSlug;
@@ -76,7 +89,11 @@ class VariantAttribute extends Model
         while (
             static::query()
                 ->when($ignoreId, fn ($query) => $query->whereKeyNot($ignoreId))
-                ->where('product_id', $productId)
+                ->when(
+                    $productId,
+                    fn ($query) => $query->where('product_id', $productId),
+                    fn ($query) => $query->whereNull('product_id')
+                )
                 ->where('slug', $slug)
                 ->exists()
         ) {

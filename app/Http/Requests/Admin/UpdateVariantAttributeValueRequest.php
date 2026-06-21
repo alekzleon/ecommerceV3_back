@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -29,6 +30,10 @@ class UpdateVariantAttributeValueRequest extends FormRequest
             $data['is_active'] = filter_var($this->input('is_active'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
         }
 
+        if ($this->has('remove_image')) {
+            $data['remove_image'] = filter_var($this->input('remove_image'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        }
+
         $this->merge($data);
     }
 
@@ -51,6 +56,21 @@ class UpdateVariantAttributeValueRequest extends FormRequest
             'sort_order' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'is_active' => ['sometimes', 'nullable', 'boolean'],
             'metadata' => ['sometimes', 'nullable', 'array'],
+            'image' => ['nullable', 'image', 'max:2048'],
+            'remove_image' => ['sometimes', 'nullable', 'boolean'],
+        ];
+    }
+
+    public function after(): array
+    {
+        return [
+            function (Validator $validator) {
+                $attribute = $this->route('variantAttribute');
+
+                if (($this->hasFile('image') || $this->boolean('remove_image')) && $attribute?->slug !== 'color') {
+                    $validator->errors()->add('image', 'La imagen solo está permitida para valores del atributo Color.');
+                }
+            },
         ];
     }
 }

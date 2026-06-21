@@ -277,6 +277,8 @@ class CheckoutController extends Controller
                 'name' => $item->name_snapshot,
                 'brand' => $item->brand_snapshot,
                 'image' => $item->image_snapshot,
+                'selected_attribute_value_ids' => data_get($item->metadata, 'selected_attribute_value_ids', []),
+                'selected_attributes' => data_get($item->metadata, 'selected_attributes', []),
                 'quantity' => (float) $item->quantity,
                 'unit_price' => (float) $item->unit_price,
                 'price_info' => data_get($item->metadata, 'price_info'),

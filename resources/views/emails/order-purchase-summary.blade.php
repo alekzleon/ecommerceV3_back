@@ -39,10 +39,17 @@
                     $discountPercentage = data_get($item->promotion_snapshot, 'discount_percentage');
                     $fromQuantity = data_get($item->promotion_snapshot, 'from_quantity');
                     $toQuantity = data_get($item->promotion_snapshot, 'to_quantity');
+                    $selectedAttributes = collect(data_get($item->metadata, 'selected_attributes', []))
+                        ->map(fn ($selected) => trim((string) data_get($selected, 'attribute')) . ': ' . trim((string) data_get($selected, 'value')))
+                        ->filter()
+                        ->implode(' / ');
                 @endphp
                 <tr>
                     <td style="border-bottom: 1px solid #f3f4f6; padding: 8px;">
                         {{ $item->name_snapshot }}
+                        @if ($selectedAttributes)
+                            <br><span style="color: #6b7280; font-size: 12px;">{{ $selectedAttributes }}</span>
+                        @endif
                         @if ($item->promotion_name_snapshot)
                             <br><span style="color: #6b7280; font-size: 12px;">Promo: {{ $item->promotion_name_snapshot }}</span>
                         @endif

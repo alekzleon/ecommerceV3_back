@@ -56,6 +56,10 @@ class ProductVariantController extends Controller
 
         unset($data['attribute_value_ids']);
 
+        if ($this->productRequiresAttributeValues($product) && empty($attributeValueIds)) {
+            return $this->missingAttributeValuesResponse();
+        }
+
         if (!isset($data['sort_order'])) {
             $data['sort_order'] = ((int) $product->variants()->max('sort_order')) + 1;
         }
@@ -93,6 +97,10 @@ class ProductVariantController extends Controller
         $attributeValueIds = $data['attribute_value_ids'] ?? null;
 
         unset($data['attribute_value_ids']);
+
+        if ($this->productRequiresAttributeValues($product) && empty($attributeValueIds)) {
+            return $this->missingAttributeValuesResponse();
+        }
 
         DB::transaction(function () use ($variant, $data, $attributeValueIds, $request) {
             $variant->update($data);
@@ -162,5 +170,23 @@ class ProductVariantController extends Controller
     protected function ensureVariantBelongsToProduct(Product $product, ProductVariant $variant): void
     {
         abort_unless((int) $variant->product_id === (int) $product->id, 404);
+    }
+
+    protected function productRequiresAttributeValues(Product $product): bool
+    {
+        return $product->variantAttributes()->active()->exists();
+    }
+
+    protected function missingAttributeValuesResponse(): JsonResponse
+    {
+        return response()->json([
+            'ok' => false,
+            'message' => 'Selecciona al menos un valor de atributo para la variante.',
+            'errors' => [
+                'attribute_value_ids' => [
+                    'Selecciona al menos un valor de atributo para la variante.',
+                ],
+            ],
+        ], 422);
     }
 }

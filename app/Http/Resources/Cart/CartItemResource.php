@@ -36,6 +36,8 @@ class CartItemResource extends JsonResource
             'family' => $this->family_snapshot,
             'status' => $this->status,
             'stock' => $this->stockPayload(),
+            'selected_attribute_value_ids' => data_get($this->metadata, 'selected_attribute_value_ids', []),
+            'selected_attributes' => data_get($this->metadata, 'selected_attributes', []),
 
             // cantidades
             'quantity' => (float) $this->quantity,

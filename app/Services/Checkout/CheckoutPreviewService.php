@@ -189,6 +189,8 @@ class CheckoutPreviewService
             'image' => $item->image_snapshot,
             'category' => $item->category_snapshot,
             'family' => $item->family_snapshot,
+            'selected_attribute_value_ids' => data_get($item->metadata, 'selected_attribute_value_ids', []),
+            'selected_attributes' => data_get($item->metadata, 'selected_attributes', []),
             'quantity' => $quantity,
             'unit_price' => $baseUnitPrice,
             'price_info' => [
