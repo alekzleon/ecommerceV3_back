@@ -10,11 +10,19 @@
     @if ($order->orden_compra)
         <p style="margin-top: 0;">Orden de compra <strong>{{ $order->orden_compra }}</strong></p>
     @endif
-    @if ($order->folio_microsip)
-        <p style="margin-top: 0;">Folio Microsip <strong>{{ $order->folio_microsip }}</strong></p>
+
+    @if (!empty($isAdminNotification))
+        <p>Se registró una nueva compra en Cloudi Shop.</p>
+    @else
+        <p>Hola {{ $user->name ?? 'cliente' }}, recibimos tu compra correctamente.</p>
     @endif
 
-    <p>Hola {{ $user->name ?? 'cliente' }}, recibimos tu compra correctamente.</p>
+    @if ($order->document_notes)
+        <div style="margin-top: 14px; padding: 12px; border: 1px solid #e5e7eb; background: #f9fafb;">
+            <strong>Notas del documento</strong>
+            <p style="margin: 6px 0 0;">{{ $order->document_notes }}</p>
+        </div>
+    @endif
 
     @php
         $coupon = data_get($order->metadata, 'coupon');

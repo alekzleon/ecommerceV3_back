@@ -7,7 +7,6 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\StripeWebhookEvent;
-use App\Services\Orders\DoctoVeService;
 use App\Services\Orders\OrderNotificationService;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
@@ -18,8 +17,7 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 class StripePaymentService
 {
     public function __construct(
-        protected OrderNotificationService $orderNotificationService,
-        protected DoctoVeService $doctoVeService
+        protected OrderNotificationService $orderNotificationService
     ) {
     }
 
@@ -282,7 +280,6 @@ class StripePaymentService
         if ($order->payment_status === Order::PAYMENT_PAID) {
             $this->deductOrderStock($order->fresh(['items.product']));
             $this->activateCashbackTransactions($order);
-            $this->doctoVeService->createFromPaidOrder($order->fresh(['user.customerProfile', 'items.product']));
             $this->orderNotificationService->sendPurchaseNotifications($order->fresh(['user.customerProfile', 'user.customerPfrProfile', 'user.defaultAddress', 'items', 'payments']));
 
             return;
@@ -299,8 +296,6 @@ class StripePaymentService
 
         $this->deductOrderStock($order->fresh(['items.product']));
         $this->activateCashbackTransactions($order);
-
-        $this->doctoVeService->createFromPaidOrder($order->fresh(['user.customerProfile', 'items.product']));
 
         $this->orderNotificationService->sendPurchaseNotifications($order->fresh(['user.customerProfile', 'user.customerPfrProfile', 'user.defaultAddress', 'items', 'payments']));
     }

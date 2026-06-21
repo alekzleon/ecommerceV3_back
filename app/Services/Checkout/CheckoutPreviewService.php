@@ -9,7 +9,7 @@ use Illuminate\Support\Collection;
 
 class CheckoutPreviewService
 {
-    public function build(Cart $cart, ?int $dirCliId = null): array
+    public function build(Cart $cart, ?int $addressId = null, ?int $dirCliId = null): array
     {
         $cart->loadMissing([
             'user.defaultAddress',
@@ -19,7 +19,7 @@ class CheckoutPreviewService
         ]);
 
         $items = $cart->items->values();
-        $shipping = $this->buildShipping($cart, $dirCliId);
+        $shipping = $this->buildShipping($cart, $addressId, $dirCliId);
         $blockers = $this->blockers($cart, $items, $shipping['selected_address']);
         $checkoutItems = $items->map(fn (CartItem $item, int $index) => $this->buildItem($item, $index + 1))->values();
 
@@ -71,11 +71,6 @@ class CheckoutPreviewService
                 'code' => 'missing_shipping_address',
                 'message' => 'Agrega o selecciona una dirección de envío.',
             ];
-        } elseif (! data_get($selectedAddress, 'dir_cli_id')) {
-            $blockers[] = [
-                'code' => 'missing_dir_cli_id',
-                'message' => 'La dirección seleccionada no tiene DIR_CLI_ID de Microsip.',
-            ];
         }
 
         foreach ($items as $item) {
@@ -112,17 +107,19 @@ class CheckoutPreviewService
         return $blockers;
     }
 
-    protected function buildShipping(Cart $cart, ?int $dirCliId = null): array
+    protected function buildShipping(Cart $cart, ?int $addressId = null, ?int $dirCliId = null): array
     {
         $addresses = $cart->user?->addresses
             ? $cart->user->addresses->sortByDesc('is_default')->sortByDesc('id')->values()
             : collect();
 
-        $address = $dirCliId
+        $address = $addressId
+            ? $addresses->firstWhere('id', $addressId)
+            : ($dirCliId
             ? $addresses->firstWhere('dir_cli_id', $dirCliId)
-            : $cart->user?->defaultAddress;
+            : $cart->user?->defaultAddress);
 
-        if ($dirCliId) {
+        if ($addressId || $dirCliId) {
             abort_unless($address, 422, 'La dirección seleccionada no existe o no pertenece al cliente.');
         }
 

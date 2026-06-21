@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\V1\EcommerceSettingController;
 use App\Http\Controllers\Api\V1\StripeWebhookController;
 use App\Http\Controllers\Api\V1\SiteSettingController;
 use App\Http\Controllers\Api\V1\Account\AddressController;
+use App\Http\Controllers\Api\V1\Account\OrderController as AccountOrderController;
 use App\Http\Controllers\Api\V1\Account\FavoriteController;
 use App\Http\Controllers\Api\V1\Account\CustomerPfrProfileController;
 use App\Http\Controllers\Api\V1\Account\WishlistController;
@@ -89,6 +90,7 @@ Route::prefix('v1')->group(function () {
     */
     Route::get('/categories', [CategoryController::class, 'index']);
     Route::get('/products', [ProductController::class, 'index']);
+    Route::get('/products/smart-search', [ProductController::class, 'smartSearch']);
     Route::get('/products/recent-purchases', [ProductController::class, 'recentPurchases']);
     Route::get('/products/{slug}', [ProductController::class, 'show']);
     Route::get('/catalog/sidebar', [CatalogController::class, 'sidebar']);
@@ -103,6 +105,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/ecommerce-settings/contact-map-url', [EcommerceSettingController::class, 'contactMapUrl']);
     Route::get('/ecommerce-settings/meta-pixel', [EcommerceSettingController::class, 'metaPixel']);
     Route::get('/ecommerce-settings/abandoned-cart', [EcommerceSettingController::class, 'abandonedCart']);
+    Route::get('/ecommerce-settings/sale-notifications', [EcommerceSettingController::class, 'saleNotifications']);
     Route::get('/ecommerce-settings/home-benefits', [EcommerceSettingController::class, 'homeBenefits']);
     Route::get('/ecommerce-settings/home-benefits/{benefit}', [EcommerceSettingController::class, 'homeBenefit']);
     Route::get('/contact-faqs', [ContactFaqController::class, 'index']);
@@ -239,12 +242,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/customer-pfr-profile', [CustomerPfrProfileController::class, 'show']);
             Route::post('/customer-pfr-profile', [CustomerPfrProfileController::class, 'store']);
 
-            Route::get('/orders', function () {
-                return response()->json([
-                    'ok' => true,
-                    'message' => 'Pedidos del cliente',
-                ]);
-            });
+            Route::get('/orders', [AccountOrderController::class, 'index']);
+            Route::get('/orders/{order}', [AccountOrderController::class, 'show']);
+            Route::get('/orders/{order}/purchase-order.pdf', [AccountOrderController::class, 'purchaseOrderPdf']);
         });
 
         /*
@@ -285,6 +285,9 @@ Route::prefix('v1')->group(function () {
                 | Operación
                 |--------------------------------------------------------------------------
                 */
+                Route::get('orders/{order}/purchase-order.pdf', [OrderController::class, 'purchaseOrderPdf'])
+                    ->middleware('module:pedidos');
+
                 Route::apiResource('orders', OrderController::class)
                     ->middleware('module:pedidos');
 
@@ -694,6 +697,15 @@ Route::prefix('v1')->group(function () {
                     ->middleware('module:configuracion_ecommerce');
 
                 Route::patch('ecommerce-settings/abandoned-cart', [AdminEcommerceSettingController::class, 'updateAbandonedCart'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/sale-notifications', [AdminEcommerceSettingController::class, 'saleNotifications'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/sale-notifications', [AdminEcommerceSettingController::class, 'updateSaleNotifications'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/sale-notifications', [AdminEcommerceSettingController::class, 'updateSaleNotifications'])
                     ->middleware('module:configuracion_ecommerce');
 
                 Route::get('ecommerce-settings/home-benefits', [AdminEcommerceSettingController::class, 'homeBenefits'])

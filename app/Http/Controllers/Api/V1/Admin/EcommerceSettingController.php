@@ -10,6 +10,7 @@ use App\Http\Requests\Admin\UpdateGeneralLogoRequest;
 use App\Http\Requests\Admin\UpdateHomeBenefitRequest;
 use App\Http\Requests\Admin\UpdateMetaPixelSettingRequest;
 use App\Http\Requests\Admin\UpdateNavTitleSettingRequest;
+use App\Http\Requests\Admin\UpdateSaleNotificationSettingRequest;
 use App\Models\EcommerceSetting;
 use App\Models\SiteSetting;
 use Illuminate\Http\JsonResponse;
@@ -109,6 +110,31 @@ class EcommerceSettingController extends Controller
             'data' => [
                 'key' => $setting->key,
                 'value' => EcommerceSetting::abandonedCartSettings(),
+            ],
+        ]);
+    }
+
+    public function saleNotifications(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_SALE_NOTIFICATIONS,
+                'value' => EcommerceSetting::saleNotificationSettings(),
+            ],
+        ]);
+    }
+
+    public function updateSaleNotifications(UpdateSaleNotificationSettingRequest $request): JsonResponse
+    {
+        $setting = EcommerceSetting::setValue(EcommerceSetting::KEY_SALE_NOTIFICATIONS, $request->validated());
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Configuración de notificaciones de venta actualizada correctamente.',
+            'data' => [
+                'key' => $setting->key,
+                'value' => EcommerceSetting::saleNotificationSettings(),
             ],
         ]);
     }

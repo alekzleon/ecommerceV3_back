@@ -23,12 +23,18 @@ class OrderService
     ) {
     }
 
-    public function createPendingFromActiveCart(User $user, ?int $dirCliId = null): Order
+    public function createPendingFromActiveCart(
+        User $user,
+        ?int $addressId = null,
+        ?int $dirCliId = null,
+        ?string $documentNotes = null
+    ): Order
     {
-        return DB::transaction(function () use ($user, $dirCliId) {
+        return DB::transaction(function () use ($user, $addressId, $dirCliId, $documentNotes) {
             $cart = $this->cartService->getOrCreateActiveCart($user);
             $cart = $this->cartService->recalculateCart($cart);
-            $preview = $this->checkoutPreviewService->build($cart, $dirCliId);
+            $preview = $this->checkoutPreviewService->build($cart, $addressId, $dirCliId);
+            $documentNotes = $this->normalizeDocumentNotes($documentNotes);
 
             abort_unless($preview['can_checkout'], 422, 'El carrito tiene detalles por resolver antes del checkout.');
             abort_unless((float) data_get($preview, 'totals.total', 0) > 0, 422, 'El total del pedido debe ser mayor a cero.');
@@ -49,10 +55,12 @@ class OrderService
                     'orden_compra' => $ordenCompra,
                     'folio_microsip' => $folioMicrosip,
                     'shipping_address_snapshot' => data_get($preview, 'shipping.selected_address'),
+                    'document_notes' => $documentNotes,
                     'metadata' => array_merge($existingOrder->metadata ?? [], [
                         'orden_compra' => $ordenCompra,
                         'folio_microsip' => $folioMicrosip,
                         'dir_cli_id' => data_get($preview, 'shipping.selected_address.dir_cli_id'),
+                        'document_notes' => $documentNotes,
                     ]),
                 ])->save();
 
@@ -74,10 +82,12 @@ class OrderService
                 'total' => data_get($preview, 'totals.total', 0),
                 'payment_status' => Order::PAYMENT_PENDING,
                 'shipping_address_snapshot' => data_get($preview, 'shipping.selected_address'),
+                'document_notes' => $documentNotes,
                 'metadata' => [
                     'cart_id' => $cart->id,
                     'orden_compra' => $ordenCompra,
                     'dir_cli_id' => data_get($preview, 'shipping.selected_address.dir_cli_id'),
+                    'document_notes' => $documentNotes,
                     'promotions_applied' => data_get($preview, 'promotions_applied', []),
                     'coupon' => data_get($preview, 'coupon'),
                     'loyalty' => data_get($preview, 'loyalty', []),
@@ -339,6 +349,13 @@ class OrderService
         } while (Order::query()->where('orden_compra', $ordenCompra)->exists());
 
         return $ordenCompra;
+    }
+
+    protected function normalizeDocumentNotes(?string $documentNotes): ?string
+    {
+        $documentNotes = trim(preg_replace('/\s+/', ' ', (string) $documentNotes));
+
+        return $documentNotes !== '' ? $documentNotes : null;
     }
 
     protected function microsipOrderKeySnapshot(mixed $productId): array

@@ -38,6 +38,7 @@ class Order extends Model
         'stripe_payment_intent_id',
         'paid_at',
         'shipping_address_snapshot',
+        'document_notes',
         'metadata',
     ];
 

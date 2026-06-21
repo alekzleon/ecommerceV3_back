@@ -45,6 +45,17 @@ class EcommerceSettingController extends Controller
         ]);
     }
 
+    public function saleNotifications(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_SALE_NOTIFICATIONS,
+                'value' => EcommerceSetting::saleNotificationSettings(),
+            ],
+        ]);
+    }
+
     public function navTitle(): JsonResponse
     {
         return response()->json([

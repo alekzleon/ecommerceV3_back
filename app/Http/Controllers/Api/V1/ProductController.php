@@ -12,6 +12,7 @@ use App\Services\ProductPriceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ProductController extends Controller
 {
@@ -193,6 +194,88 @@ class ProductController extends Controller
         ]);
     }
 
+    public function smartSearch(Request $request): JsonResponse
+    {
+        $queryText = trim((string) $request->string('q')->toString());
+        $perPage = max(1, min((int) $request->integer('per_page', 24), 60));
+        $page = max(1, (int) $request->integer('page', 1));
+        $user = $this->currentUser($request);
+        $userId = $user ? (int) $user->id : null;
+        $parsed = $this->parseSmartSearchQuery($queryText);
+        $terms = collect($parsed['terms']);
+        $inStockOnly = filter_var($request->input('in_stock', true), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true;
+
+        $productsQuery = $this->productListQuery($userId)
+            ->where('is_active', true)
+            ->when($inStockOnly, fn ($query) => $query->where(function ($stockQuery) {
+                $stockQuery->whereNull('stock')->orWhere('stock', '>', 0);
+            }))
+            ->when($parsed['min_price'] !== null, fn ($query) => $query->where('default_price', '>=', $parsed['min_price']))
+            ->when($parsed['max_price'] !== null, fn ($query) => $query->where('default_price', '<=', $parsed['max_price']));
+
+        if ($terms->isNotEmpty() && $parsed['max_price'] === null && $parsed['min_price'] === null) {
+            $productsQuery->where(fn ($subQuery) => $this->applySmartSearchTerms($subQuery, $terms));
+        }
+
+        $products = $productsQuery
+            ->limit(500)
+            ->get()
+            ->map(function (Product $product) use ($parsed, $terms) {
+                $match = $this->scoreSmartSearchProduct($product, $terms, $parsed);
+                $payload = $this->formatProduct($product);
+                $payload['relevance_score'] = $match['score'];
+                $payload['match_reasons'] = $match['reasons'];
+
+                return $payload;
+            })
+            ->filter(function (array $product) use ($terms, $parsed) {
+                if ($terms->isEmpty()) {
+                    return true;
+                }
+
+                if ($parsed['max_price'] !== null || $parsed['min_price'] !== null) {
+                    return $product['relevance_score'] >= 5;
+                }
+
+                return $product['relevance_score'] > 0;
+            })
+            ->sortByDesc('relevance_score')
+            ->values();
+
+        $total = $products->count();
+        $items = $products->forPage($page, $perPage)->values();
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Búsqueda inteligente aplicada correctamente.',
+            'data' => [
+                'query' => $queryText,
+                'interpreted' => [
+                    'intent' => $parsed['intent'],
+                    'recipient' => $parsed['recipient'],
+                    'min_price' => $parsed['min_price'],
+                    'max_price' => $parsed['max_price'],
+                    'keywords' => $parsed['keywords'],
+                    'terms' => $parsed['terms'],
+                    'filters' => [
+                        'price_gte' => $parsed['min_price'],
+                        'price_lte' => $parsed['max_price'],
+                        'in_stock' => $inStockOnly,
+                    ],
+                ],
+                'products' => $items,
+            ],
+            'meta' => [
+                'current_page' => $page,
+                'last_page' => (int) max(1, ceil($total / $perPage)),
+                'per_page' => $perPage,
+                'total' => $total,
+                'from' => $total > 0 ? (($page - 1) * $perPage) + 1 : null,
+                'to' => $total > 0 ? min($page * $perPage, $total) : null,
+            ],
+        ]);
+    }
+
     public function show(Request $request, string $slug): JsonResponse
     {
         $user = $this->currentUser($request);
@@ -311,6 +394,208 @@ class ProductController extends Controller
             ->limit($limit);
 
         return $query->pluck('id');
+    }
+
+    protected function parseSmartSearchQuery(string $query): array
+    {
+        $normalized = $this->normalizeSmartSearchText($query);
+        $maxPrice = $this->extractSmartSearchPrice($normalized, [
+            '/(?:menos\s+de|menor\s+a|menor\s+de|hasta|maximo|max|debajo\s+de|por\s+menos\s+de)\s*\$?\s*([0-9]+(?:[.,][0-9]+)?)/',
+            '/\$?\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:pesos|mxn)?\s*(?:o\s+menos|para\s+abajo)/',
+        ]);
+        $minPrice = $this->extractSmartSearchPrice($normalized, [
+            '/(?:mas\s+de|mayor\s+a|mayor\s+de|desde|minimo|min)\s*\$?\s*([0-9]+(?:[.,][0-9]+)?)/',
+        ]);
+
+        $intent = str_contains($normalized, 'regalo') || str_contains($normalized, 'detalle') || str_contains($normalized, 'presente')
+            ? 'gift'
+            : 'product_search';
+        $recipient = $this->extractSmartSearchRecipient($normalized);
+        $keywords = $this->smartSearchKeywords($normalized);
+        $terms = $this->expandSmartSearchTerms($keywords, $intent, $recipient);
+
+        return [
+            'intent' => $intent,
+            'recipient' => $recipient,
+            'min_price' => $minPrice,
+            'max_price' => $maxPrice,
+            'keywords' => $keywords,
+            'terms' => $terms,
+        ];
+    }
+
+    protected function extractSmartSearchPrice(string $query, array $patterns): ?float
+    {
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $query, $matches)) {
+                return round((float) str_replace(',', '.', $matches[1]), 2);
+            }
+        }
+
+        return null;
+    }
+
+    protected function extractSmartSearchRecipient(string $query): ?string
+    {
+        $recipients = [
+            'mama' => ['mama', 'madre', 'mamá'],
+            'papa' => ['papa', 'padre', 'papá'],
+            'mujer' => ['mujer', 'esposa', 'novia', 'hermana', 'abuela'],
+            'hombre' => ['hombre', 'esposo', 'novio', 'hermano', 'abuelo'],
+            'nino' => ['nino', 'niño', 'infantil', 'kids'],
+            'oficina' => ['oficina', 'trabajo', 'home office'],
+        ];
+
+        foreach ($recipients as $recipient => $aliases) {
+            foreach ($aliases as $alias) {
+                if (str_contains($query, $this->normalizeSmartSearchText($alias))) {
+                    return $recipient;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    protected function smartSearchKeywords(string $query): array
+    {
+        $query = preg_replace('/\b[0-9]+(?:[.,][0-9]+)?\b/', ' ', $query);
+        $query = preg_replace('/\b(?:pesos|mxn|menos|menor|mayor|hasta|maximo|max|minimo|min|desde|para|por|de|del|la|el|los|las|un|una|unos|unas|y|o|con|sin|que|sea|algo|busco|buscar|quiero|necesito)\b/', ' ', $query);
+
+        return collect(preg_split('/\s+/', trim((string) $query)) ?: [])
+            ->map(fn ($term) => trim((string) $term))
+            ->filter(fn ($term) => mb_strlen($term) >= 3)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    protected function expandSmartSearchTerms(array $keywords, string $intent, ?string $recipient): array
+    {
+        $terms = collect($keywords);
+
+        if ($intent === 'gift') {
+            $terms = $terms->merge(['regalo', 'detalle', 'presente', 'promocion', 'oferta']);
+        }
+
+        $recipientTerms = [
+            'mama' => ['mama', 'madre', 'mujer', 'hogar', 'cuidado', 'belleza'],
+            'papa' => ['papa', 'padre', 'hombre', 'herramienta', 'tecnologia'],
+            'mujer' => ['mujer', 'belleza', 'cuidado', 'hogar'],
+            'hombre' => ['hombre', 'tecnologia', 'herramienta', 'gaming'],
+            'nino' => ['nino', 'infantil', 'kids', 'juguete'],
+            'oficina' => ['oficina', 'trabajo', 'productividad', 'escritorio'],
+        ];
+
+        if ($recipient && isset($recipientTerms[$recipient])) {
+            $terms = $terms->merge($recipientTerms[$recipient]);
+        }
+
+        return $terms
+            ->map(fn ($term) => $this->normalizeSmartSearchText((string) $term))
+            ->filter(fn ($term) => mb_strlen($term) >= 3)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    protected function applySmartSearchTerms($query, $terms): void
+    {
+        foreach ($terms as $term) {
+            $query->orWhere('name', 'like', "%{$term}%")
+                ->orWhere('description', 'like', "%{$term}%")
+                ->orWhere('short_description', 'like', "%{$term}%")
+                ->orWhere('brand', 'like', "%{$term}%")
+                ->orWhere('keyword', 'like', "%{$term}%")
+                ->orWhere('sku', 'like', "%{$term}%")
+                ->orWhereHas('category', fn ($categoryQuery) => $categoryQuery->where('name', 'like', "%{$term}%"))
+                ->orWhereHas('family', fn ($familyQuery) => $familyQuery->where('name', 'like', "%{$term}%"));
+        }
+    }
+
+    protected function scoreSmartSearchProduct(Product $product, $terms, array $parsed): array
+    {
+        $score = 0;
+        $reasons = [];
+        $haystack = [
+            'name' => $this->normalizeSmartSearchText((string) $product->name),
+            'keyword' => $this->normalizeSmartSearchText((string) $product->keyword),
+            'short_description' => $this->normalizeSmartSearchText((string) $product->short_description),
+            'description' => $this->normalizeSmartSearchText((string) $product->description),
+            'brand' => $this->normalizeSmartSearchText((string) $product->brand),
+            'category' => $this->normalizeSmartSearchText((string) $product->category?->name),
+            'family' => $this->normalizeSmartSearchText((string) $product->family?->name),
+            'sku' => $this->normalizeSmartSearchText((string) $product->sku),
+        ];
+
+        foreach ($terms as $term) {
+            $matched = false;
+
+            foreach ([
+                'name' => 24,
+                'keyword' => 22,
+                'category' => 16,
+                'family' => 16,
+                'short_description' => 12,
+                'brand' => 10,
+                'description' => 8,
+                'sku' => 6,
+            ] as $field => $weight) {
+                if ($term !== '' && str_contains($haystack[$field], $term)) {
+                    $score += $weight;
+                    $matched = true;
+                    $reasons[] = match ($field) {
+                        'name' => "Coincide con el nombre: {$term}",
+                        'keyword' => "Coincide con palabras clave: {$term}",
+                        'category' => "Coincide con categoría: {$term}",
+                        'family' => "Coincide con familia: {$term}",
+                        'short_description' => "Coincide con descripción corta: {$term}",
+                        'brand' => "Coincide con marca: {$term}",
+                        'sku' => "Coincide con SKU: {$term}",
+                        default => "Coincide con descripción: {$term}",
+                    };
+                }
+            }
+
+            if (! $matched && $parsed['max_price'] !== null) {
+                $score += 1;
+            }
+        }
+
+        $price = (float) $product->default_price;
+
+        if ($parsed['max_price'] !== null && $price <= (float) $parsed['max_price']) {
+            $score += 20;
+            $reasons[] = 'Precio menor o igual a $' . number_format((float) $parsed['max_price'], 2);
+        }
+
+        if ($parsed['min_price'] !== null && $price >= (float) $parsed['min_price']) {
+            $score += 10;
+            $reasons[] = 'Precio mayor o igual a $' . number_format((float) $parsed['min_price'], 2);
+        }
+
+        if ($product->stock === null || (float) $product->stock > 0) {
+            $score += 6;
+            $reasons[] = 'Disponible para compra';
+        }
+
+        if ($parsed['intent'] === 'gift' && collect($terms)->intersect(['regalo', 'detalle', 'presente'])->isNotEmpty()) {
+            $score += 6;
+            $reasons[] = 'Relacionado con búsqueda de regalo';
+        }
+
+        return [
+            'score' => min(100, $score),
+            'reasons' => collect($reasons)->unique()->take(5)->values()->all(),
+        ];
+    }
+
+    protected function normalizeSmartSearchText(string $text): string
+    {
+        $text = Str::ascii(mb_strtolower($text));
+        $text = preg_replace('/[^a-z0-9.\s]/', ' ', $text);
+
+        return trim(preg_replace('/\s+/', ' ', (string) $text));
     }
 
     protected function formatProduct(Product $product): array

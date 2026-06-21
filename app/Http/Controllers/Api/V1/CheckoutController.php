@@ -42,10 +42,15 @@ class CheckoutController extends Controller
         $cart = $this->cartService->recalculateCart($cart);
 
         $validated = $request->validate([
+            'address_id' => ['nullable', 'integer', 'min:1'],
             'dir_cli_id' => ['nullable', 'integer', 'min:1'],
         ]);
 
-        $preview = $this->checkoutPreviewService->build($cart, $validated['dir_cli_id'] ?? null);
+        $preview = $this->checkoutPreviewService->build(
+            $cart,
+            $validated['address_id'] ?? null,
+            $validated['dir_cli_id'] ?? null
+        );
 
         return response()->json([
             'ok' => true,
@@ -79,10 +84,15 @@ class CheckoutController extends Controller
         $cart = $this->cartService->recalculateCart($cart);
 
         $validated = $request->validate([
+            'address_id' => ['nullable', 'integer', 'min:1'],
             'dir_cli_id' => ['nullable', 'integer', 'min:1'],
         ]);
 
-        $preview = $this->checkoutPreviewService->build($cart, $validated['dir_cli_id'] ?? null);
+        $preview = $this->checkoutPreviewService->build(
+            $cart,
+            $validated['address_id'] ?? null,
+            $validated['dir_cli_id'] ?? null
+        );
 
         return response()->json([
             'ok' => $preview['can_checkout'],
@@ -102,12 +112,16 @@ class CheckoutController extends Controller
     public function createOrder(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            'address_id' => ['nullable', 'integer', 'min:1'],
             'dir_cli_id' => ['nullable', 'integer', 'min:1'],
+            'document_notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
         $order = $this->orderService->createPendingFromActiveCart(
             $request->user(),
-            $validated['dir_cli_id'] ?? null
+            $validated['address_id'] ?? null,
+            $validated['dir_cli_id'] ?? null,
+            $validated['document_notes'] ?? null
         );
 
         return response()->json([
@@ -246,7 +260,6 @@ class CheckoutController extends Controller
             'id' => $order->id,
             'number' => $order->number,
             'orden_compra' => $order->orden_compra,
-            'folio_microsip' => $order->folio_microsip,
             'status' => $order->status,
             'payment_status' => $order->payment_status,
             'payment_method' => $order->payment_method,
@@ -264,6 +277,7 @@ class CheckoutController extends Controller
             'coupon' => data_get($order->metadata, 'coupon'),
             'tax_breakdown' => data_get($order->metadata, 'tax_breakdown', []),
             'shipping_address' => $order->shipping_address_snapshot,
+            'document_notes' => $order->document_notes,
             'items' => $order->items->map(fn ($item) => [
                 'id' => $item->id,
                 'product_id' => $item->product_id,
