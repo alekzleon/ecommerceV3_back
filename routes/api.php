@@ -36,6 +36,8 @@ use App\Http\Controllers\Api\V1\Admin\RoleController;
 use App\Http\Controllers\Api\V1\Admin\AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\OrderController;
 use App\Http\Controllers\Api\V1\Admin\CustomerController;
+use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
+use App\Http\Controllers\Api\V1\Admin\FamilyController as AdminFamilyController;
 use App\Http\Controllers\Api\V1\Admin\CreditController;
 use App\Http\Controllers\Api\V1\Admin\CollectionController;
 use App\Http\Controllers\Api\V1\Admin\ContactFaqController as AdminContactFaqController;
@@ -327,6 +329,51 @@ Route::prefix('v1')->group(function () {
 
                 Route::patch('customers/{customer}/status', [CustomerController::class, 'updateStatus'])
                     ->middleware('module:clientes');
+
+                Route::get('categories', [AdminCategoryController::class, 'index'])
+                    ->middleware('module:productos');
+
+                Route::post('categories', [AdminCategoryController::class, 'store'])
+                    ->middleware('module:productos');
+
+                Route::get('categories/{category}', [AdminCategoryController::class, 'show'])
+                    ->middleware('module:productos');
+
+                Route::post('categories/{category}', [AdminCategoryController::class, 'update'])
+                    ->middleware('module:productos');
+
+                Route::put('categories/{category}', [AdminCategoryController::class, 'update'])
+                    ->middleware('module:productos');
+
+                Route::patch('categories/{category}', [AdminCategoryController::class, 'update'])
+                    ->middleware('module:productos');
+
+                Route::delete('categories/{category}', [AdminCategoryController::class, 'destroy'])
+                    ->middleware('module:productos');
+
+                Route::patch('categories/{category}/status', [AdminCategoryController::class, 'updateStatus'])
+                    ->middleware('module:productos');
+
+                Route::get('families', [AdminFamilyController::class, 'index'])
+                    ->middleware('module:productos');
+
+                Route::post('families', [AdminFamilyController::class, 'store'])
+                    ->middleware('module:productos');
+
+                Route::get('families/{family}', [AdminFamilyController::class, 'show'])
+                    ->middleware('module:productos');
+
+                Route::put('families/{family}', [AdminFamilyController::class, 'update'])
+                    ->middleware('module:productos');
+
+                Route::patch('families/{family}', [AdminFamilyController::class, 'update'])
+                    ->middleware('module:productos');
+
+                Route::delete('families/{family}', [AdminFamilyController::class, 'destroy'])
+                    ->middleware('module:productos');
+
+                Route::patch('families/{family}/status', [AdminFamilyController::class, 'updateStatus'])
+                    ->middleware('module:productos');
 
                 Route::get('products', [AdProductController::class, 'index'])
                     ->middleware('module:productos');

@@ -29,13 +29,13 @@ class UserSeederRoles extends Seeder
 
             User::updateOrCreate(
                 [
-                    'email' => $roleName . '@ecommerce.com',
+                    'email' => $roleName . '@cloudishop.mx',
                 ],
                 [
                     'name' => ucfirst(str_replace('_', ' ', $roleName)),
                     'username' => $roleName,
-                    'email' => $roleName . '@ecommerce.com',
-                    'password' => Hash::make('password'),
+                    'email' => $roleName . '@cloudishop.mx',
+                    'password' => Hash::make('Password'),
                     'role_id' => $role->id,
                 ]
             );

@@ -21,7 +21,9 @@ class AdminNavigationController extends Controller
         }
 
         $groupNames = [
+            'analitica' => 'Analítica',
             'administracion' => 'Administración',
+            'catalogo' => 'Catálogo',
             'operacion' => 'Operación',
             'finanzas' => 'Finanzas',
             'marketing' => 'Marketing',

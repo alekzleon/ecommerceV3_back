@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
@@ -16,6 +17,7 @@ class Category extends Model
         'code',
         'name',
         'slug',
+        'image_path',
         'cuenta_almacen',
         'cuenta_costo_venta',
         'cuenta_ventas',
@@ -42,6 +44,10 @@ class Category extends Model
         'is_active' => 'boolean',
         'fecha_hora_creacion' => 'datetime',
         'fecha_hora_ult_modif' => 'datetime',
+    ];
+
+    protected $appends = [
+        'image_url',
     ];
 
     protected static function booted(): void
@@ -76,6 +82,15 @@ class Category extends Model
     public function families(): HasMany
     {
         return $this->hasMany(Family::class);
+    }
+
+    protected function imageUrl(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->image_path
+                ? asset('storage/' . ltrim($this->image_path, '/'))
+                : null
+        );
     }
 
     protected static function generateUniqueSlug(string $name, ?int $ignoreId = null): string

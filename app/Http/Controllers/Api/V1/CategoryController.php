@@ -19,6 +19,7 @@ class CategoryController extends Controller
                 'code',
                 'name',
                 'slug',
+                'image_path',
             ])
             ->map(fn (Category $category) => [
                 'id' => $category->grupo_linea_id ?? $category->id,
@@ -27,6 +28,8 @@ class CategoryController extends Controller
                 'code' => $category->code,
                 'name' => $category->name,
                 'slug' => $category->slug,
+                'image_path' => $category->image_path,
+                'image_url' => $category->image_url,
             ]);
 
         return response()->json([
