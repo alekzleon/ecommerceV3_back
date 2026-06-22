@@ -22,8 +22,9 @@ return [
     'allowed_origins' => [
         'http://localhost:5173',
         'http://localhost:5174',
-        'https://pfr2026.com',
-        'https://www.pfr2026.com',
+        'https://demo.cloudishop.mx',
+        'https://www.demo.cloudishop.mx',
+        'https://cloudishop.mx'
     ],
 
     'allowed_origins_patterns' => [],
