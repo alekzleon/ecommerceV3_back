@@ -6,11 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
 use App\Models\CashbackTransaction;
 use App\Models\Order;
+use App\Services\SalesChannelService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class OrderController extends Controller
 {
+    public function __construct(protected SalesChannelService $salesChannelService)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $perPage = (int) $request->integer('per_page', 12);
@@ -95,6 +100,8 @@ class OrderController extends Controller
             'id' => $order->id,
             'number' => $order->number,
             'orden_compra' => $order->orden_compra,
+            'sales_channel' => $order->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL,
+            'sales_channel_label' => $this->salesChannelService->label($order->sales_channel),
             'status' => $order->status,
             'status_label' => $this->statusLabel((string) $order->status),
             'payment_status' => $order->payment_status,

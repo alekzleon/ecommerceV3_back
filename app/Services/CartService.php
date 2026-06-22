@@ -53,6 +53,7 @@ class CartService
             'user_id' => $user->id,
             'status' => CartStatus::ACTIVE->value,
             'currency' => 'MXN',
+            'sales_channel' => 'online_store',
             'items_count' => 0,
             'subtotal_snapshot' => 0,
             'discount_snapshot' => 0,

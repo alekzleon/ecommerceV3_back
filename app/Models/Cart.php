@@ -20,6 +20,7 @@ class Cart extends Model
         'tax_snapshot',
         'total_snapshot',
         'source',
+        'sales_channel',
         'last_activity_at',
         'converted_at',
         'abandoned_at',

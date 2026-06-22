@@ -32,6 +32,13 @@ class AddCartItemRequest extends FormRequest
             'quantity' => ['required', 'numeric', 'min:0'],
             'attribute_value_ids' => ['sometimes', 'array'],
             'attribute_value_ids.*' => ['integer', 'exists:variant_attribute_values,id'],
+            'sales_channel' => ['sometimes', 'nullable', 'string', 'max:40'],
+            'channel' => ['sometimes', 'nullable', 'string', 'max:40'],
+            'utm_source' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'utm_medium' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'utm_campaign' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'utm_content' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'utm_term' => ['sometimes', 'nullable', 'string', 'max:120'],
         ];
     }
 

@@ -17,6 +17,7 @@ use App\Services\CartService;
 use App\Services\CartExcelService;
 use App\Services\Orders\OrderService;
 use App\Services\ProductPriceService;
+use App\Services\SalesChannelService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -27,7 +28,8 @@ class CartController extends Controller
         protected CartService $cartService,
         protected CartExcelService $cartExcelService,
         protected OrderService $orderService,
-        protected ProductPriceService $productPriceService
+        protected ProductPriceService $productPriceService,
+        protected SalesChannelService $salesChannelService
     ) {
     }
 
@@ -46,9 +48,13 @@ class CartController extends Controller
         }
 
         // $cart = $this->cartService->getOrCreateActiveCart($request->user())->load('items');
-        $cart = $this->cartService->recalculateCart(
-            $this->cartService->getOrCreateActiveCart($request->user())
+        $cart = $this->cartService->getOrCreateActiveCart($request->user());
+        $cart = $this->salesChannelService->applyToCart(
+            $cart,
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
         );
+        $cart = $this->cartService->recalculateCart($cart);
 
         return response()->json([
             'success' => true,
@@ -73,9 +79,13 @@ class CartController extends Controller
             ]);
         }
 
-        $cart = $this->cartService->recalculateCart(
-            $this->cartService->getOrCreateActiveCart($request->user())
+        $cart = $this->cartService->getOrCreateActiveCart($request->user());
+        $cart = $this->salesChannelService->applyToCart(
+            $cart,
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
         );
+        $cart = $this->cartService->recalculateCart($cart);
 
         return response()->json([
             'success' => true,
@@ -106,12 +116,46 @@ class CartController extends Controller
             quantity: (float) $request->input('quantity'),
             attributeValueIds: $request->input('attribute_value_ids', [])
         );
+        $cart = $this->salesChannelService->applyToCart(
+            $cart,
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
+        );
 
         return response()->json([
             'success' => true,
             'message' => 'Producto agregado al carrito correctamente.',
             'data' => new CartResource($cart),
         ], 201);
+    }
+
+    public function updateSalesChannel(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'sales_channel' => ['nullable', 'string', 'max:40'],
+            'channel' => ['nullable', 'string', 'max:40'],
+            'utm_source' => ['nullable', 'string', 'max:80'],
+            'utm_medium' => ['nullable', 'string', 'max:80'],
+            'utm_campaign' => ['nullable', 'string', 'max:120'],
+            'utm_content' => ['nullable', 'string', 'max:120'],
+            'utm_term' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        $cart = $this->salesChannelService->applyToCart(
+            $this->cartService->getOrCreateActiveCart($request->user()),
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Canal de venta actualizado correctamente.',
+            'data' => [
+                'cart' => new CartResource($cart),
+                'accepted_channels' => SalesChannelService::ALLOWED_CHANNELS,
+                'received' => $validated,
+            ],
+        ]);
     }
 
     public function updateItem(UpdateCartItemRequest $request, CartItem $item): JsonResponse

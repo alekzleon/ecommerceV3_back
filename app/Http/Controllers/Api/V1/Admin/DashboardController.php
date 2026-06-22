@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\User;
+use App\Services\SalesChannelService;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Http\JsonResponse;
@@ -18,6 +19,10 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
+    public function __construct(protected SalesChannelService $salesChannelService)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         [$from, $to] = $this->dateRange($request);
@@ -43,6 +48,37 @@ class DashboardController extends Controller
                     'low_stock_products' => $this->lowStockProducts($from, $to),
                     'recent_orders' => $this->recentOrders($from, $to),
                 ],
+            ],
+        ]);
+    }
+
+    public function salesChannels(Request $request): JsonResponse
+    {
+        [$from, $to] = $this->dateRange($request);
+        $channel = $this->salesChannelService->normalize($request->string('sales_channel')->toString());
+        $limit = max(1, min((int) $request->integer('limit', 5), 20));
+        $channels = $this->salesByChannel($from, $to);
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Dashboard de canales de venta obtenido correctamente.',
+            'data' => [
+                'filters' => [
+                    'from' => $from->toDateString(),
+                    'to' => $to->toDateString(),
+                    'sales_channel' => $channel,
+                    'limit' => $limit,
+                ],
+                'summary' => $this->salesChannelSummary($channels),
+                'channels' => $channels,
+                'top_products_by_channel' => $this->topProductsByChannel($from, $to, $limit, $channel),
+                'accepted_channels' => collect(SalesChannelService::ALLOWED_CHANNELS)
+                    ->map(fn ($acceptedChannel) => [
+                        'value' => $acceptedChannel,
+                        'label' => $this->salesChannelService->label($acceptedChannel),
+                    ])
+                    ->values()
+                    ->all(),
             ],
         ]);
     }
@@ -263,6 +299,8 @@ class DashboardController extends Controller
                 ],
                 'status' => $order->status,
                 'payment_status' => $order->payment_status,
+                'sales_channel' => $order->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL,
+                'sales_channel_label' => $this->salesChannelService->label($order->sales_channel),
                 'total' => (float) $order->total,
                 'created_at' => $order->created_at?->toISOString(),
                 'paid_at' => $order->paid_at?->toISOString(),
@@ -277,6 +315,99 @@ class DashboardController extends Controller
             ->where('status', Order::STATUS_PAID)
             ->where('payment_status', Order::PAYMENT_PAID)
             ->whereBetween(DB::raw('COALESCE(paid_at, created_at)'), [$from, $to]);
+    }
+
+    protected function salesByChannel(Carbon $from, Carbon $to): array
+    {
+        $totalSales = (float) $this->paidOrders($from, $to)->sum('total');
+        $totalOrders = (int) $this->paidOrders($from, $to)->count();
+
+        return $this->paidOrders($from, $to)
+            ->selectRaw("COALESCE(NULLIF(sales_channel, ''), 'online_store') as sales_channel")
+            ->selectRaw('COUNT(*) as orders')
+            ->selectRaw('COUNT(DISTINCT user_id) as customers')
+            ->selectRaw('SUM(total) as sales')
+            ->selectRaw('SUM(discount) as discounts')
+            ->selectRaw('AVG(total) as average_order_value')
+            ->groupBy(DB::raw("COALESCE(NULLIF(sales_channel, ''), 'online_store')"))
+            ->orderByDesc('sales')
+            ->get()
+            ->map(function ($row) use ($totalSales, $totalOrders) {
+                $sales = round((float) $row->sales, 2);
+                $orders = (int) $row->orders;
+                $channel = $row->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL;
+
+                return [
+                    'sales_channel' => $channel,
+                    'sales_channel_label' => $this->salesChannelService->label($channel),
+                    'orders' => $orders,
+                    'customers' => (int) $row->customers,
+                    'sales' => $sales,
+                    'discounts' => round((float) $row->discounts, 2),
+                    'average_order_value' => round((float) $row->average_order_value, 2),
+                    'sales_percentage' => $totalSales > 0 ? round(($sales / $totalSales) * 100, 2) : 0.0,
+                    'orders_percentage' => $totalOrders > 0 ? round(($orders / $totalOrders) * 100, 2) : 0.0,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    protected function salesChannelSummary(array $channels): array
+    {
+        $collection = collect($channels);
+        $sales = round((float) $collection->sum('sales'), 2);
+        $orders = (int) $collection->sum('orders');
+        $topChannel = $collection->sortByDesc('sales')->first();
+
+        return [
+            'sales' => $sales,
+            'orders' => $orders,
+            'average_order_value' => $orders > 0 ? round($sales / $orders, 2) : 0.0,
+            'channels_count' => $collection->count(),
+            'top_channel' => $topChannel ? [
+                'sales_channel' => $topChannel['sales_channel'],
+                'sales_channel_label' => $topChannel['sales_channel_label'],
+                'sales' => $topChannel['sales'],
+                'orders' => $topChannel['orders'],
+            ] : null,
+        ];
+    }
+
+    protected function topProductsByChannel(Carbon $from, Carbon $to, int $limit = 5, ?string $channel = null): array
+    {
+        $rows = OrderItem::query()
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('orders.status', Order::STATUS_PAID)
+            ->where('orders.payment_status', Order::PAYMENT_PAID)
+            ->whereBetween(DB::raw('COALESCE(orders.paid_at, orders.created_at)'), [$from, $to])
+            ->when($channel, fn ($query) => $query->where('orders.sales_channel', $channel))
+            ->select('order_items.product_id', 'order_items.name_snapshot', 'order_items.sku_snapshot')
+            ->selectRaw("COALESCE(NULLIF(orders.sales_channel, ''), 'online_store') as sales_channel")
+            ->selectRaw('SUM(order_items.quantity) as quantity')
+            ->selectRaw('SUM(order_items.line_total) as revenue')
+            ->groupBy(DB::raw("COALESCE(NULLIF(orders.sales_channel, ''), 'online_store')"))
+            ->groupBy('order_items.product_id', 'order_items.name_snapshot', 'order_items.sku_snapshot')
+            ->orderBy('sales_channel')
+            ->orderByDesc('revenue')
+            ->get()
+            ->groupBy('sales_channel');
+
+        return $rows
+            ->map(function ($products, string $salesChannel) use ($limit) {
+                return [
+                    'sales_channel' => $salesChannel,
+                    'sales_channel_label' => $this->salesChannelService->label($salesChannel),
+                    'products' => $products
+                        ->take($limit)
+                        ->map(fn ($row) => $this->productSalesPayload($row))
+                        ->values()
+                        ->all(),
+                ];
+            })
+            ->sortBy(fn ($row) => array_search($row['sales_channel'], SalesChannelService::ALLOWED_CHANNELS, true))
+            ->values()
+            ->all();
     }
 
     protected function soldProductsBaseQuery(Carbon $from, Carbon $to)

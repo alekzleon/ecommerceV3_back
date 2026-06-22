@@ -47,6 +47,7 @@ use App\Http\Controllers\Api\V1\Admin\SyncController;
 use App\Http\Controllers\Api\V1\Admin\SettingController;
 use App\Http\Controllers\Api\V1\Admin\AdminNavigationController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdProductController;
+use App\Http\Controllers\Api\V1\Admin\ProductBulkImportController;
 use App\Http\Controllers\Api\V1\Admin\ProductPriceScaleController;
 use App\Http\Controllers\Api\V1\Admin\ProductGalleryItemController;
 use App\Http\Controllers\Api\V1\Admin\ProductVariantController;
@@ -157,6 +158,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/cart/excel/layout', [CartController::class, 'downloadExcelLayout']);
         Route::post('/cart/excel/import', [CartController::class, 'importExcel']);
         Route::post('/cart/items', [CartController::class, 'storeItem']);
+        Route::patch('/cart/sales-channel', [CartController::class, 'updateSalesChannel']);
         Route::patch('/cart/items/{item}', [CartController::class, 'updateItem']);
         Route::delete('/cart/items/{item}', [CartController::class, 'destroyItem']);
         Route::delete('/cart/items', [CartController::class, 'clear']);
@@ -263,6 +265,8 @@ Route::prefix('v1')->group(function () {
                 */
                 Route::get('/dashboard', [DashboardController::class, 'index'])
                     ->middleware('module:dashboard');
+                Route::get('/dashboard/sales-channels', [DashboardController::class, 'salesChannels'])
+                    ->middleware('module:dashboard');
 
                 Route::get('/navigation/menu', [AdminNavigationController::class, 'menu']);
 
@@ -325,6 +329,15 @@ Route::prefix('v1')->group(function () {
                     ->middleware('module:clientes');
 
                 Route::get('products', [AdProductController::class, 'index'])
+                    ->middleware('module:productos');
+
+                Route::get('products/bulk-import/layout', [ProductBulkImportController::class, 'layout'])
+                    ->middleware('module:productos');
+
+                Route::post('products/bulk-import/preview', [ProductBulkImportController::class, 'preview'])
+                    ->middleware('module:productos');
+
+                Route::post('products/bulk-import', [ProductBulkImportController::class, 'import'])
                     ->middleware('module:productos');
 
                 Route::post('products', [AdProductController::class, 'store'])

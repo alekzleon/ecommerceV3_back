@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\User;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPreviewService;
+use App\Services\SalesChannelService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -19,7 +20,8 @@ class OrderService
 {
     public function __construct(
         protected CartService $cartService,
-        protected CheckoutPreviewService $checkoutPreviewService
+        protected CheckoutPreviewService $checkoutPreviewService,
+        protected SalesChannelService $salesChannelService
     ) {
     }
 
@@ -27,14 +29,18 @@ class OrderService
         User $user,
         ?int $addressId = null,
         ?int $dirCliId = null,
-        ?string $documentNotes = null
+        ?string $documentNotes = null,
+        ?string $salesChannel = null,
+        array $salesChannelTracking = []
     ): Order
     {
-        return DB::transaction(function () use ($user, $addressId, $dirCliId, $documentNotes) {
+        return DB::transaction(function () use ($user, $addressId, $dirCliId, $documentNotes, $salesChannel, $salesChannelTracking) {
             $cart = $this->cartService->getOrCreateActiveCart($user);
+            $cart = $this->salesChannelService->applyToCart($cart, $salesChannel, $salesChannelTracking);
             $cart = $this->cartService->recalculateCart($cart);
             $preview = $this->checkoutPreviewService->build($cart, $addressId, $dirCliId);
             $documentNotes = $this->normalizeDocumentNotes($documentNotes);
+            $salesChannel = $cart->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL;
 
             abort_unless($preview['can_checkout'], 422, 'El carrito tiene detalles por resolver antes del checkout.');
             abort_unless((float) data_get($preview, 'totals.total', 0) > 0, 422, 'El total del pedido debe ser mayor a cero.');
@@ -54,11 +60,14 @@ class OrderService
                 $existingOrder->forceFill([
                     'orden_compra' => $ordenCompra,
                     'folio_microsip' => $folioMicrosip,
+                    'sales_channel' => $salesChannel,
                     'shipping_address_snapshot' => data_get($preview, 'shipping.selected_address'),
                     'document_notes' => $documentNotes,
                     'metadata' => array_merge($existingOrder->metadata ?? [], [
                         'orden_compra' => $ordenCompra,
                         'folio_microsip' => $folioMicrosip,
+                        'sales_channel' => $salesChannel,
+                        'sales_channel_tracking' => data_get($cart->metadata, 'sales_channel_tracking', []),
                         'dir_cli_id' => data_get($preview, 'shipping.selected_address.dir_cli_id'),
                         'document_notes' => $documentNotes,
                     ]),
@@ -72,6 +81,7 @@ class OrderService
                 'cart_id' => $cart->id,
                 'number' => $this->nextOrderNumber(),
                 'orden_compra' => $ordenCompra,
+                'sales_channel' => $salesChannel,
                 'status' => Order::STATUS_PENDING_PAYMENT,
                 'currency' => strtoupper((string) data_get($preview, 'currency', 'MXN')),
                 'items_count' => (int) round((float) data_get($preview, 'totals.items_count', 0)),
@@ -86,6 +96,8 @@ class OrderService
                 'metadata' => [
                     'cart_id' => $cart->id,
                     'orden_compra' => $ordenCompra,
+                    'sales_channel' => $salesChannel,
+                    'sales_channel_tracking' => data_get($cart->metadata, 'sales_channel_tracking', []),
                     'dir_cli_id' => data_get($preview, 'shipping.selected_address.dir_cli_id'),
                     'document_notes' => $documentNotes,
                     'promotions_applied' => data_get($preview, 'promotions_applied', []),

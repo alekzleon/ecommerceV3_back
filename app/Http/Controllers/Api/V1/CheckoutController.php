@@ -9,6 +9,7 @@ use App\Services\CartService;
 use App\Services\Checkout\CheckoutPreviewService;
 use App\Services\Orders\OrderService;
 use App\Services\Payments\StripePaymentService;
+use App\Services\SalesChannelService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -18,7 +19,8 @@ class CheckoutController extends Controller
         protected CartService $cartService,
         protected CheckoutPreviewService $checkoutPreviewService,
         protected OrderService $orderService,
-        protected StripePaymentService $stripePaymentService
+        protected StripePaymentService $stripePaymentService,
+        protected SalesChannelService $salesChannelService
     ) {
     }
 
@@ -39,11 +41,23 @@ class CheckoutController extends Controller
         }
 
         $cart = $this->cartService->getOrCreateActiveCart($request->user());
+        $cart = $this->salesChannelService->applyToCart(
+            $cart,
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
+        );
         $cart = $this->cartService->recalculateCart($cart);
 
         $validated = $request->validate([
             'address_id' => ['nullable', 'integer', 'min:1'],
             'dir_cli_id' => ['nullable', 'integer', 'min:1'],
+            'sales_channel' => ['nullable', 'string', 'max:40'],
+            'channel' => ['nullable', 'string', 'max:40'],
+            'utm_source' => ['nullable', 'string', 'max:80'],
+            'utm_medium' => ['nullable', 'string', 'max:80'],
+            'utm_campaign' => ['nullable', 'string', 'max:120'],
+            'utm_content' => ['nullable', 'string', 'max:120'],
+            'utm_term' => ['nullable', 'string', 'max:120'],
         ]);
 
         $preview = $this->checkoutPreviewService->build(
@@ -81,11 +95,23 @@ class CheckoutController extends Controller
         }
 
         $cart = $this->cartService->getOrCreateActiveCart($request->user());
+        $cart = $this->salesChannelService->applyToCart(
+            $cart,
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
+        );
         $cart = $this->cartService->recalculateCart($cart);
 
         $validated = $request->validate([
             'address_id' => ['nullable', 'integer', 'min:1'],
             'dir_cli_id' => ['nullable', 'integer', 'min:1'],
+            'sales_channel' => ['nullable', 'string', 'max:40'],
+            'channel' => ['nullable', 'string', 'max:40'],
+            'utm_source' => ['nullable', 'string', 'max:80'],
+            'utm_medium' => ['nullable', 'string', 'max:80'],
+            'utm_campaign' => ['nullable', 'string', 'max:120'],
+            'utm_content' => ['nullable', 'string', 'max:120'],
+            'utm_term' => ['nullable', 'string', 'max:120'],
         ]);
 
         $preview = $this->checkoutPreviewService->build(
@@ -115,13 +141,22 @@ class CheckoutController extends Controller
             'address_id' => ['nullable', 'integer', 'min:1'],
             'dir_cli_id' => ['nullable', 'integer', 'min:1'],
             'document_notes' => ['nullable', 'string', 'max:1000'],
+            'sales_channel' => ['nullable', 'string', 'max:40'],
+            'channel' => ['nullable', 'string', 'max:40'],
+            'utm_source' => ['nullable', 'string', 'max:80'],
+            'utm_medium' => ['nullable', 'string', 'max:80'],
+            'utm_campaign' => ['nullable', 'string', 'max:120'],
+            'utm_content' => ['nullable', 'string', 'max:120'],
+            'utm_term' => ['nullable', 'string', 'max:120'],
         ]);
 
         $order = $this->orderService->createPendingFromActiveCart(
             $request->user(),
             $validated['address_id'] ?? null,
             $validated['dir_cli_id'] ?? null,
-            $validated['document_notes'] ?? null
+            $validated['document_notes'] ?? null,
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
         );
 
         return response()->json([
@@ -260,6 +295,8 @@ class CheckoutController extends Controller
             'id' => $order->id,
             'number' => $order->number,
             'orden_compra' => $order->orden_compra,
+            'sales_channel' => $order->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL,
+            'sales_channel_label' => $this->salesChannelService->label($order->sales_channel),
             'status' => $order->status,
             'payment_status' => $order->payment_status,
             'payment_method' => $order->payment_method,

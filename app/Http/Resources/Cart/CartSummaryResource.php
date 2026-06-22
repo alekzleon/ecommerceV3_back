@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Cart;
 
+use App\Services\SalesChannelService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,6 +17,8 @@ class CartSummaryResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'sales_channel' => $this->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL,
+            'sales_channel_label' => app(SalesChannelService::class)->label($this->sales_channel),
             'items_count' => $this->items_count,
             'subtotal' => (float) $this->subtotal_snapshot,
             'discount' => (float) $this->discount_snapshot,

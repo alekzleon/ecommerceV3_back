@@ -23,6 +23,7 @@ class Order extends Model
         'cart_id',
         'number',
         'orden_compra',
+        'sales_channel',
         'folio_microsip',
         'status',
         'currency',

@@ -8,6 +8,7 @@ use App\Models\EcommerceSetting;
 use App\Models\Order;
 use App\Models\SiteSetting;
 use App\Services\Pdf\SimplePdf;
+use App\Services\SalesChannelService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -15,6 +16,10 @@ use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
 {
+    public function __construct(protected SalesChannelService $salesChannelService)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $perPage = (int) $request->integer('per_page', 20);
@@ -124,6 +129,7 @@ class OrderController extends Controller
                 Order::PAYMENT_PAID,
                 Order::PAYMENT_FAILED,
             ])],
+            'sales_channel' => ['sometimes', 'nullable', 'string', Rule::in(SalesChannelService::ALLOWED_CHANNELS)],
             'payment_method' => ['sometimes', 'nullable', 'string', 'max:40'],
             'paid_at' => ['sometimes', 'nullable', 'date'],
             'document_notes' => ['sometimes', 'nullable', 'string', 'max:1000'],
@@ -155,6 +161,13 @@ class OrderController extends Controller
             $validated['document_notes'] = $this->normalizeDocumentNotes($validated['document_notes']);
             $validated['metadata'] = array_merge($order->metadata ?? [], $validated['metadata'] ?? [], [
                 'document_notes' => $validated['document_notes'],
+            ]);
+        }
+
+        if (array_key_exists('sales_channel', $validated)) {
+            $validated['sales_channel'] = $validated['sales_channel'] ?: SalesChannelService::DEFAULT_CHANNEL;
+            $validated['metadata'] = array_merge($order->metadata ?? [], $validated['metadata'] ?? [], [
+                'sales_channel' => $validated['sales_channel'],
             ]);
         }
 
@@ -205,6 +218,8 @@ class OrderController extends Controller
             'id' => $order->id,
             'number' => $order->number,
             'orden_compra' => $order->orden_compra,
+            'sales_channel' => $order->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL,
+            'sales_channel_label' => $this->salesChannelService->label($order->sales_channel),
             'status' => $order->status,
             'payment_status' => $order->payment_status,
             'payment_method' => $order->payment_method,
