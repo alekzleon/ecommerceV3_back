@@ -329,7 +329,7 @@ class DashboardController extends Controller
             ->selectRaw('SUM(total) as sales')
             ->selectRaw('SUM(discount) as discounts')
             ->selectRaw('AVG(total) as average_order_value')
-            ->groupBy(DB::raw("COALESCE(NULLIF(sales_channel, ''), 'online_store')"))
+            ->groupByRaw('1')
             ->orderByDesc('sales')
             ->get()
             ->map(function ($row) use ($totalSales, $totalOrders) {
@@ -386,7 +386,7 @@ class DashboardController extends Controller
             ->selectRaw("COALESCE(NULLIF(orders.sales_channel, ''), 'online_store') as sales_channel")
             ->selectRaw('SUM(order_items.quantity) as quantity')
             ->selectRaw('SUM(order_items.line_total) as revenue')
-            ->groupBy(DB::raw("COALESCE(NULLIF(orders.sales_channel, ''), 'online_store')"))
+            ->groupByRaw('4')
             ->groupBy('order_items.product_id', 'order_items.name_snapshot', 'order_items.sku_snapshot')
             ->orderBy('sales_channel')
             ->orderByDesc('revenue')
