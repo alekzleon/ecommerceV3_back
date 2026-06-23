@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\V1\Admin\EcommerceSettingController as AdminEcommer
 use App\Http\Controllers\Api\V1\Admin\CartController as AdminCartController;
 use App\Http\Controllers\Api\V1\Admin\UserController;
 use App\Http\Controllers\Api\V1\Admin\RoleController;
+use App\Http\Controllers\Api\V1\Admin\ModuleController;
 use App\Http\Controllers\Api\V1\Admin\AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\OrderController;
 use App\Http\Controllers\Api\V1\Admin\CustomerController;
@@ -278,13 +279,19 @@ Route::prefix('v1')->group(function () {
                 |--------------------------------------------------------------------------
                 */
                 Route::get('users/form-options', [UserController::class, 'formOptions'])
-                    ->middleware('module:usuarios');
+                    ->middleware(['manage_access', 'module:usuarios']);
 
                 Route::apiResource('users', UserController::class)
-                    ->middleware('module:usuarios');
+                    ->middleware(['manage_access', 'module:usuarios']);
 
                 Route::apiResource('roles', RoleController::class)
-                    ->middleware('module:roles');
+                    ->middleware(['manage_access', 'module:roles']);
+
+                Route::get('modules', [ModuleController::class, 'index'])
+                    ->middleware(['manage_access', 'module:roles']);
+
+                Route::put('roles/{role}/modules', [RoleController::class, 'updateModules'])
+                    ->middleware(['manage_access', 'module:roles']);
 
                 /*
                 |--------------------------------------------------------------------------

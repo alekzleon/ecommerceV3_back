@@ -16,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(HandleCors::class);
         $middleware->alias([
             'module' => \App\Http\Middleware\CheckModuleAccess::class,
+            'manage_access' => \App\Http\Middleware\EnsureUserCanManageAccess::class,
             'not_client' => \App\Http\Middleware\EnsureUserIsNotClient::class,
         ]);
     })
