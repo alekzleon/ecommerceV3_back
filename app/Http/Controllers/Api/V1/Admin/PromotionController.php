@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\ActivityLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class PromotionController extends Controller
 {
@@ -115,7 +116,11 @@ class PromotionController extends Controller
         $giftItemIds = $validated['gift_item_ids'] ?? [];
         $userIds = $validated['user_ids'] ?? [];
 
-        unset($validated['product_ids'], $validated['gift_item_ids'], $validated['user_ids'], $validated['is_combinable']);
+        if ($request->hasFile('image')) {
+            $validated['image_path'] = $request->file('image')->store('promotions', 'public');
+        }
+
+        unset($validated['product_ids'], $validated['gift_item_ids'], $validated['user_ids'], $validated['is_combinable'], $validated['image']);
 
         $promotion = Promotion::create([
             ...$validated,
@@ -177,7 +182,12 @@ class PromotionController extends Controller
         $oldGiftItemIds = $promotion->giftItems()->pluck('gift_items.id')->all();
         $oldUserIds = $promotion->users()->pluck('users.id')->all();
 
-        unset($validated['product_ids'], $validated['gift_item_ids'], $validated['user_ids'], $validated['is_combinable']);
+        if ($request->hasFile('image')) {
+            $this->deleteImage($promotion->image_path);
+            $validated['image_path'] = $request->file('image')->store('promotions', 'public');
+        }
+
+        unset($validated['product_ids'], $validated['gift_item_ids'], $validated['user_ids'], $validated['is_combinable'], $validated['image']);
 
         $validated['config'] = array_merge($promotion->config ?? [], $validated['config'] ?? []);
 
@@ -231,6 +241,8 @@ class PromotionController extends Controller
 
     public function destroy(Promotion $promotion): JsonResponse
     {
+        $this->deleteImage($promotion->image_path);
+
         $promotion->delete();
 
         return response()->json([
@@ -250,6 +262,13 @@ class PromotionController extends Controller
             'message' => 'Estado actualizado correctamente.',
             'is_active' => $promotion->is_active,
         ]);
+    }
+
+    protected function deleteImage(?string $path): void
+    {
+        if ($path && Storage::disk('public')->exists($path)) {
+            Storage::disk('public')->delete($path);
+        }
     }
 
     public function syncProducts(Request $request, Promotion $promotion): JsonResponse

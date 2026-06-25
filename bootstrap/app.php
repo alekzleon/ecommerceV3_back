@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'module' => \App\Http\Middleware\CheckModuleAccess::class,
             'manage_access' => \App\Http\Middleware\EnsureUserCanManageAccess::class,
             'not_client' => \App\Http\Middleware\EnsureUserIsNotClient::class,
+            'admin_or_super_admin' => \App\Http\Middleware\EnsureUserIsAdminOrSuperAdmin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\ContactController;
 use App\Http\Controllers\Api\V1\ContactFaqController;
 use App\Http\Controllers\Api\V1\ContactLeadController;
 use App\Http\Controllers\Api\V1\EcommerceSettingController;
+use App\Http\Controllers\Api\V1\HomeController;
 use App\Http\Controllers\Api\V1\StripeWebhookController;
 use App\Http\Controllers\Api\V1\SiteSettingController;
 use App\Http\Controllers\Api\V1\Account\AddressController;
@@ -103,6 +104,8 @@ Route::prefix('v1')->group(function () {
     Route::get('/brand-banners', [BrandBannerController::class, 'index']);
     Route::get('/monthly-promotions', [MonthlyPromotionController::class, 'index']);
     Route::get('/settings', [SiteSettingController::class, 'show']);
+    Route::get('/storefront', [HomeController::class, 'storefront']);
+    Route::get('/home', [HomeController::class, 'home']);
     Route::get('/ecommerce-settings/nav-title', [EcommerceSettingController::class, 'navTitle']);
     Route::get('/ecommerce-settings/general-logo', [EcommerceSettingController::class, 'generalLogo']);
     Route::get('/ecommerce-settings/contact-faq-image', [EcommerceSettingController::class, 'contactFaqImage']);
@@ -605,6 +608,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('promotions/form-options', [PromotionController::class, 'formOptions'])
                     ->middleware('module:promociones');
 
+                Route::post('promotions/{promotion}', [PromotionController::class, 'update'])
+                    ->middleware('module:promociones');
+
                 Route::apiResource('promotions', PromotionController::class)
                     ->middleware('module:promociones');
 
@@ -705,6 +711,15 @@ Route::prefix('v1')->group(function () {
 
                 Route::post('settings', [SettingController::class, 'store'])
                     ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/storefront', [AdminEcommerceSettingController::class, 'storefront'])
+                    ->middleware(['module:configuracion_ecommerce', 'admin_or_super_admin']);
+
+                Route::put('ecommerce-settings/storefront', [AdminEcommerceSettingController::class, 'updateStorefront'])
+                    ->middleware(['module:configuracion_ecommerce', 'admin_or_super_admin']);
+
+                Route::patch('ecommerce-settings/storefront', [AdminEcommerceSettingController::class, 'updateStorefront'])
+                    ->middleware(['module:configuracion_ecommerce', 'admin_or_super_admin']);
 
                 Route::get('ecommerce-settings/nav-title', [AdminEcommerceSettingController::class, 'navTitle'])
                     ->middleware('module:configuracion_ecommerce');

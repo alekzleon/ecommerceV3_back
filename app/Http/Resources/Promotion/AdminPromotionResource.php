@@ -4,6 +4,7 @@ namespace App\Http\Resources\Promotion;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class AdminPromotionResource extends JsonResource
 {
@@ -14,6 +15,8 @@ class AdminPromotionResource extends JsonResource
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
+            'image_path' => $this->image_path,
+            'image_url' => $this->image_path ? Storage::disk('public')->url($this->image_path) : null,
             'type' => $this->type->value,
             'type_label' => $this->type->label(),
 

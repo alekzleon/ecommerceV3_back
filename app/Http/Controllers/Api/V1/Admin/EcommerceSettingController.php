@@ -11,6 +11,7 @@ use App\Http\Requests\Admin\UpdateHomeBenefitRequest;
 use App\Http\Requests\Admin\UpdateMetaPixelSettingRequest;
 use App\Http\Requests\Admin\UpdateNavTitleSettingRequest;
 use App\Http\Requests\Admin\UpdateSaleNotificationSettingRequest;
+use App\Http\Requests\Admin\UpdateStorefrontSettingRequest;
 use App\Models\EcommerceSetting;
 use App\Models\SiteSetting;
 use Illuminate\Http\JsonResponse;
@@ -18,6 +19,47 @@ use Illuminate\Support\Facades\Storage;
 
 class EcommerceSettingController extends Controller
 {
+    public function storefront(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => $this->storefrontPayload(),
+        ]);
+    }
+
+    public function updateStorefront(UpdateStorefrontSettingRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        if (array_key_exists('is_published', $validated) ||
+            array_key_exists('construction_title', $validated) ||
+            array_key_exists('construction_message', $validated)) {
+            $storefront = EcommerceSetting::storefrontSettings();
+
+            foreach (['is_published', 'construction_title', 'construction_message'] as $field) {
+                if (array_key_exists($field, $validated)) {
+                    $storefront[$field] = $validated[$field];
+                }
+            }
+
+            EcommerceSetting::setValue(EcommerceSetting::KEY_STOREFRONT, $storefront);
+        }
+
+        $activeTemplate = $validated['active_template'] ?? $validated['template'] ?? null;
+
+        if ($activeTemplate !== null) {
+            EcommerceSetting::setValue(EcommerceSetting::KEY_HOME_TEMPLATE, [
+                'active_template' => $activeTemplate,
+            ]);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Configuración de publicación y plantilla visual actualizada correctamente.',
+            'data' => $this->storefrontPayload(),
+        ]);
+    }
+
     public function homeBenefits(): JsonResponse
     {
         return response()->json([
@@ -353,6 +395,22 @@ class EcommerceSettingController extends Controller
     protected function ensureHomeBenefitNumber(int $benefit): void
     {
         abort_unless(in_array($benefit, [1, 2, 3], true), 404, 'El beneficio solicitado no existe.');
+    }
+
+    protected function storefrontPayload(): array
+    {
+        $storefront = EcommerceSetting::storefrontSettings();
+        $template = EcommerceSetting::homeTemplateSettings();
+
+        return [
+            'is_published' => (bool) data_get($storefront, 'is_published', false),
+            'construction' => [
+                'title' => data_get($storefront, 'construction_title'),
+                'message' => data_get($storefront, 'construction_message'),
+            ],
+            'active_template' => data_get($template, 'active_template', EcommerceSetting::HOME_TEMPLATE_CLASSIC),
+            'available_templates' => EcommerceSetting::availableTemplates(),
+        ];
     }
 
     protected function deleteFile(?string $path, ?string $disk): void

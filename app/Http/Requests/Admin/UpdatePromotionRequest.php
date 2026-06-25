@@ -22,6 +22,7 @@ class UpdatePromotionRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'slug' => ['required', 'string', 'max:255', "unique:promotions,slug,$id"],
             'description' => ['nullable', 'string'],
+            'image' => ['nullable', 'image', 'mimes:jpeg,png,webp,gif', 'max:10240'],
 
             'type' => ['required', 'string', Rule::enum(PromotionType::class)],
 

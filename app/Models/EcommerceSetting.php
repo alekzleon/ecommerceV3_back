@@ -6,6 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class EcommerceSetting extends Model
 {
+    public const HOME_TEMPLATE_CLASSIC = 'classic';
+    public const HOME_TEMPLATE_EDITORIAL_SHOP = 'editorial_shop';
+
     public const KEY_NAV_TITLE = 'nav_title';
     public const KEY_CONTACT_FAQ_IMAGE = 'contact_faq_image';
     public const KEY_CONTACT_MAP_URL = 'contact_map_url';
@@ -13,6 +16,8 @@ class EcommerceSetting extends Model
     public const KEY_ABANDONED_CART = 'abandoned_cart';
     public const KEY_SALE_NOTIFICATIONS = 'sale_notifications';
     public const KEY_HOME_BENEFIT_PREFIX = 'home_benefit_';
+    public const KEY_STOREFRONT = 'storefront';
+    public const KEY_HOME_TEMPLATE = 'home_template';
 
     protected $fillable = [
         'key',
@@ -93,5 +98,74 @@ class EcommerceSetting extends Model
             ->map(fn (int $benefit) => static::homeBenefitValue($benefit))
             ->values()
             ->all();
+    }
+
+    public static function storefrontSettings(): array
+    {
+        return array_merge([
+            'is_published' => false,
+            'construction_title' => 'Ecommerce en construcción',
+            'construction_message' => 'Estamos preparando la tienda. Vuelve pronto.',
+        ], static::getValue(static::KEY_STOREFRONT, []));
+    }
+
+    public static function homeTemplateSettings(): array
+    {
+        $settings = array_merge([
+            'active_template' => static::HOME_TEMPLATE_CLASSIC,
+        ], static::getValue(static::KEY_HOME_TEMPLATE, []));
+
+        if (isset($settings['template']) && ! isset($settings['active_template'])) {
+            $settings['active_template'] = $settings['template'];
+        }
+
+        if (! in_array($settings['active_template'], static::availableHomeTemplates(), true)) {
+            $settings['active_template'] = static::HOME_TEMPLATE_CLASSIC;
+        }
+
+        unset($settings['template']);
+
+        return $settings;
+    }
+
+    public static function availableTemplates(): array
+    {
+        return [
+            [
+                'key' => static::HOME_TEMPLATE_CLASSIC,
+                'name' => 'Classic',
+                'description' => 'Home equilibrado con carrusel, beneficios, categorías, productos y banners de marca.',
+                'components' => [
+                    'nav' => 'classic',
+                    'home' => 'classic',
+                    'footer' => 'classic',
+                ],
+            ],
+            [
+                'key' => static::HOME_TEMPLATE_EDITORIAL_SHOP,
+                'name' => 'Editorial Shop',
+                'description' => 'Diseño editorial con nav amplio, buscador expandible, hero de marca, carruseles y footer con newsletter.',
+                'components' => [
+                    'nav' => 'editorial_shop',
+                    'search' => 'editorial_shop_overlay',
+                    'home' => 'editorial_shop',
+                    'footer' => 'editorial_shop',
+                ],
+                'sections' => [
+                    'hero_brand_banners',
+                    'recent_purchase_products',
+                    'daily_offers',
+                    'footer',
+                ],
+            ],
+        ];
+    }
+
+    public static function availableHomeTemplates(): array
+    {
+        return [
+            static::HOME_TEMPLATE_CLASSIC,
+            static::HOME_TEMPLATE_EDITORIAL_SHOP,
+        ];
     }
 }
