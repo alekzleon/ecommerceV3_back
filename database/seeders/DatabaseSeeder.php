@@ -19,15 +19,15 @@ class DatabaseSeeder extends Seeder
         $this->call([
             AdminUserSeeder::class,
             RoleSeeder::class,
-            CategorySeeder::class,
-            FamilySeeder::class,
-            ProductSeeder::class,
+            // CategorySeeder::class,
+            // FamilySeeder::class,
+            // ProductSeeder::class,
             RoleSeeder::class,
             ModuleSeeder::class,
             RoleModuleSeeder::class,
             AssignSuperAdminToExistingUserSeeder::class,
             UserSeederRoles::class, 
-            CustomerSeeder::class,
+            // CustomerSeeder::class,
         ]);
     }
 }
