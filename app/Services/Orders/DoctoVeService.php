@@ -97,7 +97,7 @@ class DoctoVeService
                 'enviado' => 'N',
                 'cfd_envio_especial' => 'N',
                 'cfdi_certificado' => 'N',
-                'fecha_hora_creacion' => ($order->paid_at ?? $now)->format('H:i:s'),
+                'fecha_hora_creacion' => $order->created_at?->toDateString(),
                 'usuario_ult_modif' => 'ECOMMERCE',
                 'fecha_hora_ult_modif' => $now,
                 'cargar_sun' => 'N',
