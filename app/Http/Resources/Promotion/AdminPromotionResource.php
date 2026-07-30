@@ -2,9 +2,9 @@
 
 namespace App\Http\Resources\Promotion;
 
+use App\Support\TenantAssetUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class AdminPromotionResource extends JsonResource
 {
@@ -16,7 +16,7 @@ class AdminPromotionResource extends JsonResource
             'slug' => $this->slug,
             'description' => $this->description,
             'image_path' => $this->image_path,
-            'image_url' => $this->image_path ? Storage::disk('public')->url($this->image_path) : null,
+            'image_url' => TenantAssetUrl::make($this->image_path),
             'type' => $this->type->value,
             'type_label' => $this->type->label(),
 

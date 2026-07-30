@@ -30,6 +30,14 @@ class CheckModuleAccess
             ], 403);           
         }
 
+        $tenant = tenant();
+
+        if ($tenant && ! $tenant->hasPlanModule($moduleName)) {
+            return response()->json([
+                'message' => 'Tu plan actual no incluye este módulo.'
+            ], 403);
+        }
+
         if (!$user->hasModuleAccess($moduleName)) {
             return response()->json([
                 'message' => 'No tienes permiso para acceder a este módulo.'

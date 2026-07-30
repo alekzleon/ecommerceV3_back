@@ -2,9 +2,9 @@
 
 namespace App\Http\Resources\Admin;
 
+use App\Support\TenantAssetUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class AdminVariantAttributeValueResource extends JsonResource
 {
@@ -43,7 +43,7 @@ class AdminVariantAttributeValueResource extends JsonResource
         return [
             'disk' => $disk,
             'path' => $path,
-            'url' => Storage::disk($disk)->url($path),
+            'url' => $disk === 'public' ? TenantAssetUrl::make($path) : null,
         ];
     }
 }

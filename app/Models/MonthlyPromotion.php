@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
+use App\Support\TenantAssetUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Storage;
 
 class MonthlyPromotion extends Model
 {
@@ -64,7 +64,7 @@ class MonthlyPromotion extends Model
     {
         return Attribute::make(
             get: fn () => $this->image_path
-                ? Storage::disk($this->image_disk ?: 'public')->url($this->image_path)
+                ? TenantAssetUrl::make($this->image_path)
                 : null
         );
     }

@@ -50,6 +50,8 @@ class OrderController extends Controller
             ->when($request->filled('from'), fn ($query) => $query->whereDate('created_at', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($query) => $query->whereDate('created_at', '<=', $request->date('to')));
 
+        $summary = $this->ordersSummary(clone $query);
+
         match ($sortBy) {
             'oldest' => $query->orderBy('id'),
             'total_asc' => $query->orderBy('total'),
@@ -64,6 +66,7 @@ class OrderController extends Controller
             'ok' => true,
             'message' => 'Pedidos obtenidos correctamente.',
             'data' => $orders->getCollection()->map(fn (Order $order) => $this->orderSummaryPayload($order)),
+            'summary' => $summary,
             'meta' => [
                 'current_page' => $orders->currentPage(),
                 'last_page' => $orders->lastPage(),
@@ -73,6 +76,21 @@ class OrderController extends Controller
                 'to' => $orders->lastItem(),
             ],
         ]);
+    }
+
+    protected function ordersSummary($query): array
+    {
+        $paidQuery = (clone $query)
+            ->where('status', Order::STATUS_PAID)
+            ->where('payment_status', Order::PAYMENT_PAID);
+
+        return [
+            'orders_count' => (int) (clone $query)->count(),
+            'paid_orders' => (int) (clone $paidQuery)->count(),
+            'total_sold' => round((float) (clone $paidQuery)->sum('total'), 2),
+            'pending_orders' => (int) (clone $query)->where('payment_status', Order::PAYMENT_PENDING)->count(),
+            'pending_amount' => round((float) (clone $query)->where('payment_status', Order::PAYMENT_PENDING)->sum('total'), 2),
+        ];
     }
 
     public function store(Request $request)

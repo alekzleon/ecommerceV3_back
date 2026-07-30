@@ -60,6 +60,8 @@ return [
         'currency' => env('STRIPE_CURRENCY', 'mxn'),
         'success_url' => env('STRIPE_SUCCESS_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/checkout/success?session_id={CHECKOUT_SESSION_ID}'),
         'cancel_url' => env('STRIPE_CANCEL_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/checkout/cancel'),
+        'subscription_success_url' => env('STRIPE_SUBSCRIPTION_SUCCESS_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/billing/success?session_id={CHECKOUT_SESSION_ID}'),
+        'subscription_cancel_url' => env('STRIPE_SUBSCRIPTION_CANCEL_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/billing/cancel'),
     ],
 
 ];

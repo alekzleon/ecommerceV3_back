@@ -13,8 +13,8 @@ use App\Models\EcommerceSetting;
 use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\SiteSetting;
+use App\Support\TenantAssetUrl;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Storage;
 
 class HomeController extends Controller
 {
@@ -102,7 +102,7 @@ class HomeController extends Controller
                     'text' => data_get($value, 'text'),
                     'icon_disk' => $disk,
                     'icon_path' => $path,
-                    'icon_url' => $path ? Storage::disk($disk)->url($path) : null,
+                    'icon_url' => $disk === 'public' ? TenantAssetUrl::make($path) : null,
                 ];
             })
             ->values()
@@ -158,9 +158,7 @@ class HomeController extends Controller
                 'description' => $promotion->description,
                 'priority' => $promotion->priority,
                 'image_path' => $promotion->image_path,
-                'image_url' => $promotion->image_path
-                    ? asset('storage/' . ltrim($promotion->image_path, '/'))
-                    : null,
+                'image_url' => TenantAssetUrl::make($promotion->image_path),
                 'products_count' => (int) ($promotion->products_count ?? 0),
                 'product_ids' => $promotion->products->pluck('id')->values(),
             ])

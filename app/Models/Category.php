@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\TenantAssetUrl;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -88,7 +89,7 @@ class Category extends Model
     {
         return Attribute::make(
             get: fn () => $this->image_path
-                ? asset('storage/' . ltrim($this->image_path, '/'))
+                ? TenantAssetUrl::make($this->image_path)
                 : null
         );
     }

@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
+use App\Support\TenantAssetUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Storage;
 
 class GiftItem extends Model
 {
@@ -53,7 +53,7 @@ class GiftItem extends Model
     {
         return Attribute::make(
             get: fn () => $this->image_path
-                ? Storage::disk($this->image_disk ?: 'public')->url($this->image_path)
+                ? TenantAssetUrl::make($this->image_path)
                 : null
         );
     }

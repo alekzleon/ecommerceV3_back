@@ -17,16 +17,15 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
         $this->call([
+            RoleSeeder::class,
             AdminUserSeeder::class,
-            RoleSeeder::class,
-            // CategorySeeder::class,
-            // FamilySeeder::class,
-            // ProductSeeder::class,
-            RoleSeeder::class,
             ModuleSeeder::class,
             RoleModuleSeeder::class,
             AssignSuperAdminToExistingUserSeeder::class,
             UserSeederRoles::class, 
+            // CategorySeeder::class,
+            // FamilySeeder::class,
+            // ProductSeeder::class,
             // CustomerSeeder::class,
         ]);
     }

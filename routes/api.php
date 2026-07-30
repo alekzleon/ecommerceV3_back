@@ -1,7 +1,9 @@
 <?php
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Route;
+use App\Http\Middleware\InitializeTenancyByTenantHost;
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CategoryController;
@@ -20,6 +22,9 @@ use App\Http\Controllers\Api\V1\EcommerceSettingController;
 use App\Http\Controllers\Api\V1\HomeController;
 use App\Http\Controllers\Api\V1\StripeWebhookController;
 use App\Http\Controllers\Api\V1\SiteSettingController;
+use App\Http\Controllers\Api\V1\Platform\AdminAuthController as PlatformAdminAuthController;
+use App\Http\Controllers\Api\V1\Platform\AdminTenantController as PlatformAdminTenantController;
+use App\Http\Controllers\Api\V1\Platform\TenantController as PlatformTenantController;
 use App\Http\Controllers\Api\V1\Account\AddressController;
 use App\Http\Controllers\Api\V1\Account\OrderController as AccountOrderController;
 use App\Http\Controllers\Api\V1\Account\FavoriteController;
@@ -77,47 +82,108 @@ Route::prefix('v1_ping')->group(function () {
 });
 
 Route::prefix('v1')->group(function () {
+    Route::prefix('platform')->group(function () {
+        Route::get('/plans', [PlatformTenantController::class, 'plans']);
+        Route::get('/tenants/check-subdomain', [PlatformTenantController::class, 'checkSubdomain'])
+            ->middleware('throttle:30,1');
+        Route::post('/tenants', [PlatformTenantController::class, 'store'])
+            ->middleware('throttle:10,1');
+
+        Route::prefix('admin')->group(function () {
+            Route::post('/auth/login', [PlatformAdminAuthController::class, 'login'])
+                ->middleware('throttle:10,1');
+
+            Route::middleware(['auth:sanctum', 'platform_super_admin'])->group(function () {
+                Route::get('/auth/me', [PlatformAdminAuthController::class, 'me']);
+                Route::post('/auth/logout', [PlatformAdminAuthController::class, 'logout']);
+                Route::get('/dashboard', [PlatformAdminTenantController::class, 'dashboard']);
+                Route::get('/tenants', [PlatformAdminTenantController::class, 'index']);
+                Route::get('/tenants/{tenant}', [PlatformAdminTenantController::class, 'show']);
+                Route::patch('/tenants/{tenant}/subscription', [PlatformAdminTenantController::class, 'updateSubscription']);
+            });
+        });
+    });
+
+    Route::middleware(InitializeTenancyByTenantHost::class)->get('/tenant/probe', function (Request $request) {
+        return response()->json([
+            'ok' => true,
+            'tenant_id' => tenant('id'),
+            'tenant_host' => $request->attributes->get('tenant_host'),
+            'database' => config('database.connections.tenant.database'),
+            'counts' => [
+                'categories' => \App\Models\Category::query()->count(),
+                'families' => \App\Models\Family::query()->count(),
+                'products' => \App\Models\Product::query()->count(),
+                'site_settings' => \App\Models\SiteSetting::query()->count(),
+                'ecommerce_settings' => \App\Models\EcommerceSetting::query()->count(),
+            ],
+        ]);
+    });
+
+    Route::middleware(InitializeTenancyByTenantHost::class)
+        ->get('/tenant-assets/{path}', function (string $path) {
+            abort_if(str_contains($path, '..'), 404);
+            abort_unless(Storage::disk('public')->exists($path), 404);
+
+            return response()->file(Storage::disk('public')->path($path));
+        })
+        ->where('path', '.*');
 
     /*
     |--------------------------------------------------------------------------
     | Auth pública
     |--------------------------------------------------------------------------
     */
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login', [AuthController::class, 'login']);
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+    Route::middleware(InitializeTenancyByTenantHost::class)->group(function () {
+        Route::post('/register', [AuthController::class, 'register']);
+        Route::post('/login', [AuthController::class, 'login']);
+        Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+        Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+    });
+
+    Route::middleware([InitializeTenancyByTenantHost::class, 'auth:sanctum', 'not_client'])->group(function () {
+        Route::get('/tenant/subscription', [PlatformTenantController::class, 'subscription']);
+        Route::get('/tenant/subscription/plans', [PlatformTenantController::class, 'tenantPlans']);
+        Route::post('/tenant/subscription/checkout', [PlatformTenantController::class, 'createSubscriptionCheckout']);
+        Route::post('/tenant/subscription/checkout/confirm', [PlatformTenantController::class, 'confirmSubscriptionCheckout']);
+    });
 
     /*
     |--------------------------------------------------------------------------
     | Rutas públicas ecommerce
     |--------------------------------------------------------------------------
     */
-    Route::get('/categories', [CategoryController::class, 'index']);
-    Route::get('/products', [ProductController::class, 'index']);
-    Route::get('/products/smart-search', [ProductController::class, 'smartSearch']);
-    Route::get('/products/recent-purchases', [ProductController::class, 'recentPurchases']);
-    Route::get('/products/{slug}', [ProductController::class, 'show']);
-    Route::get('/catalog/sidebar', [CatalogController::class, 'sidebar']);
-    Route::get('/search/suggestions', [SearchSuggestionController::class, 'index']);
-    Route::get('/banners', [BannerController::class, 'index']);
-    Route::get('/brand-banners', [BrandBannerController::class, 'index']);
-    Route::get('/monthly-promotions', [MonthlyPromotionController::class, 'index']);
-    Route::get('/settings', [SiteSettingController::class, 'show']);
-    Route::get('/storefront', [HomeController::class, 'storefront']);
-    Route::get('/home', [HomeController::class, 'home']);
-    Route::get('/ecommerce-settings/nav-title', [EcommerceSettingController::class, 'navTitle']);
-    Route::get('/ecommerce-settings/general-logo', [EcommerceSettingController::class, 'generalLogo']);
-    Route::get('/ecommerce-settings/contact-faq-image', [EcommerceSettingController::class, 'contactFaqImage']);
-    Route::get('/ecommerce-settings/contact-map-url', [EcommerceSettingController::class, 'contactMapUrl']);
-    Route::get('/ecommerce-settings/meta-pixel', [EcommerceSettingController::class, 'metaPixel']);
-    Route::get('/ecommerce-settings/abandoned-cart', [EcommerceSettingController::class, 'abandonedCart']);
-    Route::get('/ecommerce-settings/sale-notifications', [EcommerceSettingController::class, 'saleNotifications']);
-    Route::get('/ecommerce-settings/home-benefits', [EcommerceSettingController::class, 'homeBenefits']);
-    Route::get('/ecommerce-settings/home-benefits/{benefit}', [EcommerceSettingController::class, 'homeBenefit']);
-    Route::get('/contact-faqs', [ContactFaqController::class, 'index']);
-    Route::post('/contact', [ContactController::class, 'store']);
-    Route::post('/contact-leads', [ContactLeadController::class, 'store']);
+    Route::middleware([InitializeTenancyByTenantHost::class, 'tenant_subscription'])->group(function () {
+        Route::get('/categories', [CategoryController::class, 'index']);
+        Route::get('/products', [ProductController::class, 'index']);
+        Route::get('/products/smart-search', [ProductController::class, 'smartSearch']);
+        Route::get('/products/recent-purchases', [ProductController::class, 'recentPurchases']);
+        Route::get('/products/{slug}', [ProductController::class, 'show']);
+        Route::get('/catalog/sidebar', [CatalogController::class, 'sidebar']);
+        Route::get('/search/suggestions', [SearchSuggestionController::class, 'index']);
+        Route::get('/settings', [SiteSettingController::class, 'show']);
+        Route::get('/storefront', [HomeController::class, 'storefront']);
+        Route::get('/home', [HomeController::class, 'home']);
+        Route::get('/banners', [BannerController::class, 'index']);
+        Route::get('/brand-banners', [BrandBannerController::class, 'index']);
+        Route::get('/monthly-promotions', [MonthlyPromotionController::class, 'index']);
+        Route::get('/ecommerce-settings/nav-title', [EcommerceSettingController::class, 'navTitle']);
+        Route::get('/ecommerce-settings/general-logo', [EcommerceSettingController::class, 'generalLogo']);
+        Route::get('/ecommerce-settings/contact-faq-image', [EcommerceSettingController::class, 'contactFaqImage']);
+        Route::get('/ecommerce-settings/contact-map-url', [EcommerceSettingController::class, 'contactMapUrl']);
+        Route::get('/ecommerce-settings/meta-pixel', [EcommerceSettingController::class, 'metaPixel']);
+        Route::get('/ecommerce-settings/abandoned-cart', [EcommerceSettingController::class, 'abandonedCart']);
+        Route::get('/ecommerce-settings/sale-notifications', [EcommerceSettingController::class, 'saleNotifications']);
+        Route::get('/ecommerce-settings/home-benefits', [EcommerceSettingController::class, 'homeBenefits']);
+        Route::get('/ecommerce-settings/home-benefits/{benefit}', [EcommerceSettingController::class, 'homeBenefit']);
+        Route::get('/contact-faqs', [ContactFaqController::class, 'index']);
+        Route::post('/contact', [ContactController::class, 'store']);
+        Route::post('/contact-leads', [ContactLeadController::class, 'store']);
+        Route::get('/promotions/random', [CustomerPromotionController::class, 'random']);
+        Route::get('/promotions/random-six', [CustomerPromotionController::class, 'randomSix']);
+        Route::get('/promotions/all', [CustomerPromotionController::class, 'all']);
+        Route::get('/promotions', [CustomerPromotionController::class, 'index']);
+    });
 
     /*
     |--------------------------------------------------------------------------
@@ -127,11 +193,6 @@ Route::prefix('v1')->group(function () {
     | banners, cards de producto, bloques de ofertas, etc.
     |--------------------------------------------------------------------------
     */
-    Route::get('/promotions/random', [CustomerPromotionController::class, 'random']);
-    Route::get('/promotions/random-six', [CustomerPromotionController::class, 'randomSix']);
-    Route::get('/promotions/all', [CustomerPromotionController::class, 'all']);
-    Route::get('/promotions', [CustomerPromotionController::class, 'index']);
-
     Route::post('/webhooks/stripe', StripeWebhookController::class);
 
     /*
@@ -139,7 +200,7 @@ Route::prefix('v1')->group(function () {
     | Rutas autenticadas generales
     |--------------------------------------------------------------------------
     */
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware([InitializeTenancyByTenantHost::class, 'tenant_subscription', 'auth:sanctum'])->group(function () {
 
         /*
         |--------------------------------------------------------------------------
@@ -160,6 +221,7 @@ Route::prefix('v1')->group(function () {
         |--------------------------------------------------------------------------
         */
         Route::get('/cart', [CartController::class, 'index']);
+        Route::delete('/cart', [CartController::class, 'clear']);
         Route::get('/cart/summary', [CartController::class, 'summary']);
         Route::get('/cart/excel/layout', [CartController::class, 'downloadExcelLayout']);
         Route::post('/cart/excel/import', [CartController::class, 'importExcel']);
@@ -571,26 +633,26 @@ Route::prefix('v1')->group(function () {
                     ->middleware('module:promociones');
 
                 Route::patch('banners/{banner}/toggle', [AdminBannerController::class, 'toggle'])
-                    ->middleware('module:marketing');
+                    ->middleware('module:banners');
 
                 Route::post('banners/reorder', [AdminBannerController::class, 'reorder'])
-                    ->middleware('module:marketing');
+                    ->middleware('module:banners');
 
                 Route::apiResource('banners', AdminBannerController::class)
-                    ->middleware('module:marketing');
+                    ->middleware('module:banners');
 
                 Route::patch('brand-banners/{brandBanner}/toggle', [AdminBrandBannerController::class, 'toggle'])
-                    ->middleware('module:marketing');
+                    ->middleware('module:banners');
 
                 Route::post('brand-banners/reorder', [AdminBrandBannerController::class, 'reorder'])
-                    ->middleware('module:marketing');
+                    ->middleware('module:banners');
 
                 Route::post('brand-banners/{brandBanner}', [AdminBrandBannerController::class, 'update'])
-                    ->middleware('module:marketing');
+                    ->middleware('module:banners');
 
                 Route::apiResource('brand-banners', AdminBrandBannerController::class)
                     ->parameters(['brand-banners' => 'brandBanner'])
-                    ->middleware('module:marketing');
+                    ->middleware('module:banners');
 
                 Route::patch('monthly-promotions/{monthlyPromotion}/toggle', [AdminMonthlyPromotionController::class, 'toggle'])
                     ->middleware('module:marketing');

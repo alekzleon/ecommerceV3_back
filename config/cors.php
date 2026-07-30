@@ -27,7 +27,11 @@ return [
         'https://tuxcroquetitas.com'
     ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#^http://[a-z0-9-]+\.localhost:5173$#',
+        '#^http://[a-z0-9-]+\.localhost:5174$#',
+        '#^https://[a-z0-9-]+\.cloudishop\.mx$#',
+    ],
 
     'allowed_headers' => ['*'],
 

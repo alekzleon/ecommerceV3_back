@@ -125,7 +125,7 @@ class SearchSuggestionController extends Controller
                         'slug' => $product->slug,
                         'brand' => $product->brand,
                         'sku' => $product->sku,
-                        'image_url' => $product->image_path ? asset('storage/' . $product->image_path) : null,
+                        'image_url' => $product->image_url,
                         'price' => $price,
                         'base_default_price' => (float) $product->default_price,
                         'price_info' => [

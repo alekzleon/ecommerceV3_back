@@ -34,6 +34,7 @@ class AdminNavigationController extends Controller
         $modules = $user->role->modules
             ->where('is_active', true)
             ->where('name', '!=', 'front_ecommerce')
+            ->filter(fn ($module) => ! tenant() || tenant()->hasPlanModule($module->name))
             ->sortBy('sort_order')
             ->values();
 

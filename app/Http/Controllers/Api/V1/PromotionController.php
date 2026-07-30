@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Promotion;
+use App\Support\TenantAssetUrl;
 use App\Services\CartService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -297,9 +298,7 @@ class PromotionController extends Controller
             'description' => $promotion->description,
             'priority' => $promotion->priority,
             'image_path' => $promotion->image_path,
-            'image_url' => $promotion->image_path
-                ? asset('storage/' . ltrim($promotion->image_path, '/'))
-                : null,
+            'image_url' => TenantAssetUrl::make($promotion->image_path),
             'is_active' => (bool) $promotion->is_active,
             'requires_login' => (bool) $promotion->requires_login,
             'is_general' => (bool) $promotion->is_general,

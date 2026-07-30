@@ -14,6 +14,7 @@ use App\Http\Requests\Admin\UpdateSaleNotificationSettingRequest;
 use App\Http\Requests\Admin\UpdateStorefrontSettingRequest;
 use App\Models\EcommerceSetting;
 use App\Models\SiteSetting;
+use App\Support\TenantAssetUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 
@@ -364,7 +365,7 @@ class EcommerceSettingController extends Controller
         return [
             'image_disk' => $disk,
             'image_path' => $path,
-            'image_url' => $path ? Storage::disk($disk)->url($path) : null,
+            'image_url' => $disk === 'public' ? TenantAssetUrl::make($path) : null,
         ];
     }
 
@@ -388,7 +389,7 @@ class EcommerceSettingController extends Controller
             'text' => data_get($value, 'text'),
             'icon_disk' => $disk,
             'icon_path' => $path,
-            'icon_url' => $path ? Storage::disk($disk)->url($path) : null,
+            'icon_url' => $disk === 'public' ? TenantAssetUrl::make($path) : null,
         ];
     }
 

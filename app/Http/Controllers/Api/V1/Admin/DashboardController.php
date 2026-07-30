@@ -109,7 +109,9 @@ class DashboardController extends Controller
 
         return [
             'sales' => round($sales, 2),
+            'total_sold' => round($sales, 2),
             'orders' => $orders,
+            'paid_orders' => $orders,
             'average_order_value' => $orders > 0 ? round($sales / $orders, 2) : 0.0,
             'discounts' => round($discounts, 2),
             'customers_total' => (int) User::query()->where('role_id', User::ROLE_CLIENTE)->count(),
@@ -171,7 +173,10 @@ class DashboardController extends Controller
             ->whereBetween('created_at', [$from, $to])
             ->select('status')
             ->selectRaw('COUNT(*) as count')
-            ->selectRaw('SUM(total) as total')
+            ->selectRaw('SUM(CASE WHEN status = ? AND payment_status = ? THEN total ELSE 0 END) as total', [
+                Order::STATUS_PAID,
+                Order::PAYMENT_PAID,
+            ])
             ->groupBy('status')
             ->orderBy('status')
             ->get()

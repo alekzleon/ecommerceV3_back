@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
+use App\Support\TenantAssetUrl;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Storage;
 
 class SiteSetting extends Model
 {
@@ -68,6 +68,8 @@ class SiteSetting extends Model
 
     protected function publicUrl(?string $path, ?string $disk): ?string
     {
-        return $path ? Storage::disk($disk ?: 'public')->url($path) : null;
+        return ($disk ?: 'public') === 'public'
+            ? TenantAssetUrl::make($path)
+            : null;
     }
 }

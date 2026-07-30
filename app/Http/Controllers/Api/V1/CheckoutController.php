@@ -180,7 +180,10 @@ class CheckoutController extends Controller
 
         abort_unless($order->isPendingPayment(), 422, 'El pedido no está pendiente de pago.');
 
-        $session = $this->stripePaymentService->createCheckoutSession($order);
+        $session = $this->stripePaymentService->createCheckoutSession(
+            $order,
+            $this->storefrontOrigin($request)
+        );
 
         return response()->json([
             'ok' => true,
@@ -371,5 +374,26 @@ class CheckoutController extends Controller
         }
 
         return $this->stripePaymentService->syncCheckoutSession($order->stripe_session_id) ?? $order;
+    }
+
+    protected function storefrontOrigin(Request $request): ?string
+    {
+        $origin = $request->headers->get('Origin') ?: $request->headers->get('X-Store-Origin');
+
+        if (! is_string($origin) || trim($origin) === '') {
+            return null;
+        }
+
+        $origin = trim($origin);
+        $scheme = parse_url($origin, PHP_URL_SCHEME);
+        $host = parse_url($origin, PHP_URL_HOST);
+        $port = parse_url($origin, PHP_URL_PORT);
+        $tenantHost = $request->attributes->get('tenant_host');
+
+        if (! in_array($scheme, ['http', 'https'], true) || ! $host || $host !== $tenantHost) {
+            return null;
+        }
+
+        return $scheme . '://' . $host . ($port ? ':' . $port : '');
     }
 }

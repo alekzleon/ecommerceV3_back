@@ -7,7 +7,10 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\StripeWebhookEvent;
+use App\Models\SubscriptionPayment;
+use App\Models\Tenant;
 use App\Services\Orders\OrderNotificationService;
+use Carbon\Carbon;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -21,7 +24,7 @@ class StripePaymentService
     ) {
     }
 
-    public function createCheckoutSession(Order $order): array
+    public function createCheckoutSession(Order $order, ?string $storefrontOrigin = null): array
     {
         abort_unless($order->isPendingPayment(), 422, 'El pedido no está pendiente de pago.');
         abort_unless((float) $order->total > 0, 422, 'El total del pedido debe ser mayor a cero.');
@@ -33,23 +36,21 @@ class StripePaymentService
         $order->loadMissing(['items', 'user']);
         $this->validateOrderStock($order);
 
+        if ($existingSession = $this->activeCheckoutSessionPayload($order, $secretKey, $storefrontOrigin)) {
+            return $existingSession;
+        }
+
+        $stripeMetadata = $this->stripeMetadata($order);
+
         $payload = [
             'mode' => 'payment',
-            'success_url' => config('services.stripe.success_url'),
-            'cancel_url' => $this->cancelUrl($order),
+            'success_url' => $this->successUrl($storefrontOrigin),
+            'cancel_url' => $this->cancelUrl($order, $storefrontOrigin),
             'client_reference_id' => (string) $order->id,
             'customer_email' => $order->user?->email,
-            'metadata' => [
-                'order_id' => (string) $order->id,
-                'order_number' => $order->number,
-                'user_id' => (string) $order->user_id,
-            ],
+            'metadata' => $stripeMetadata,
             'payment_intent_data' => [
-                'metadata' => [
-                    'order_id' => (string) $order->id,
-                    'order_number' => $order->number,
-                    'user_id' => (string) $order->user_id,
-                ],
+                'metadata' => $stripeMetadata,
             ],
             'line_items' => $this->lineItems($order),
         ];
@@ -97,6 +98,80 @@ class StripePaymentService
             'payment_status' => $order->payment_status,
             'amount' => (float) $order->total,
             'currency' => strtolower($order->currency),
+            'reused' => false,
+        ];
+    }
+
+    public function createSubscriptionCheckoutSession(Tenant $tenant, string $planKey, ?string $billingOrigin = null, ?string $customerEmail = null): array
+    {
+        $plan = config("plans.plans.{$planKey}");
+
+        abort_unless($plan, 422, 'El plan seleccionado no existe.');
+        abort_if((int) ($plan['price'] ?? 0) <= 0, 422, 'El plan seleccionado no requiere pago.');
+
+        $secretKey = config('services.stripe.secret_key');
+
+        abort_if(blank($secretKey), 500, 'Stripe no está configurado.');
+
+        $metadata = [
+            'tenant_id' => (string) $tenant->id,
+            'plan_key' => $planKey,
+            'checkout_type' => 'cloudishop_subscription',
+        ];
+
+        $payload = [
+            'mode' => 'subscription',
+            'success_url' => $this->subscriptionSuccessUrl($billingOrigin),
+            'cancel_url' => $this->subscriptionCancelUrl($billingOrigin),
+            'client_reference_id' => (string) $tenant->id,
+            'customer' => $tenant->provider_customer_id,
+            'customer_email' => $tenant->provider_customer_id ? null : $customerEmail,
+            'metadata' => $metadata,
+            'subscription_data' => [
+                'metadata' => $metadata,
+            ],
+            'line_items' => [[
+                'price_data' => [
+                    'currency' => strtolower((string) ($plan['currency'] ?? 'MXN')),
+                    'product_data' => [
+                        'name' => 'CloudiShop ' . ($plan['name'] ?? $planKey),
+                        'metadata' => [
+                            'plan_key' => $planKey,
+                        ],
+                    ],
+                    'recurring' => [
+                        'interval' => (string) ($plan['interval'] ?? 'month'),
+                    ],
+                    'unit_amount' => (int) $plan['price'],
+                ],
+                'quantity' => 1,
+            ]],
+        ];
+
+        try {
+            $session = Http::asForm()
+                ->withToken($secretKey)
+                ->timeout(20)
+                ->post('https://api.stripe.com/v1/checkout/sessions', $this->flatten($payload))
+                ->throw()
+                ->json();
+        } catch (RequestException $exception) {
+            $message = data_get($exception->response?->json(), 'error.message', 'No fue posible iniciar la suscripción con Stripe.');
+            throw new HttpException(422, $message, $exception);
+        }
+
+        $tenant->forceFill([
+            'payment_provider' => 'stripe',
+            'provider_customer_id' => data_get($session, 'customer') ?: $tenant->provider_customer_id,
+        ])->save();
+
+        return [
+            'tenant_id' => $tenant->id,
+            'plan_key' => $planKey,
+            'stripe_session_id' => data_get($session, 'id'),
+            'url' => data_get($session, 'url'),
+            'amount' => round(((int) $plan['price']) / 100, 2),
+            'currency' => strtolower((string) ($plan['currency'] ?? 'MXN')),
         ];
     }
 
@@ -107,6 +182,9 @@ class StripePaymentService
         $event = json_decode($payload, true);
 
         abort_unless(is_array($event), 400, 'Payload inválido.');
+
+        $tenant = $this->resolveTenantFromWebhookEvent($event);
+        tenancy()->initialize($tenant);
 
         return DB::transaction(function () use ($event) {
             $stripeEventId = (string) data_get($event, 'id');
@@ -123,6 +201,7 @@ class StripePaymentService
                 return [
                     'ok' => true,
                     'duplicate' => true,
+                    'tenant_id' => tenant('id'),
                     'event_id' => $stripeEventId,
                     'type' => $type,
                 ];
@@ -139,6 +218,11 @@ class StripePaymentService
                 'checkout.session.completed' => $this->handleCheckoutSessionCompleted(data_get($event, 'data.object', [])),
                 'payment_intent.succeeded' => $this->handlePaymentIntentSucceeded(data_get($event, 'data.object', [])),
                 'payment_intent.payment_failed' => $this->handlePaymentIntentFailed(data_get($event, 'data.object', [])),
+                'customer.subscription.created',
+                'customer.subscription.updated' => $this->handleCustomerSubscriptionUpdated(data_get($event, 'data.object', [])),
+                'customer.subscription.deleted' => $this->handleCustomerSubscriptionDeleted(data_get($event, 'data.object', [])),
+                'invoice.paid' => $this->handleInvoicePaid(data_get($event, 'data.object', [])),
+                'invoice.payment_failed' => $this->handleInvoicePaymentFailed(data_get($event, 'data.object', [])),
                 default => null,
             };
 
@@ -151,6 +235,7 @@ class StripePaymentService
             return [
                 'ok' => true,
                 'duplicate' => false,
+                'tenant_id' => tenant('id'),
                 'event_id' => $stripeEventId,
                 'type' => $type,
             ];
@@ -170,10 +255,7 @@ class StripePaymentService
         }
 
         try {
-            Http::asForm()
-                ->withToken($secretKey)
-                ->timeout(10)
-                ->post("https://api.stripe.com/v1/checkout/sessions/{$order->stripe_session_id}/expire");
+            $this->expireStripeSessionById($order->stripe_session_id, $secretKey);
         } catch (\Throwable) {
             report('No fue posible expirar la sesión de Stripe ' . $order->stripe_session_id);
         }
@@ -207,8 +289,62 @@ class StripePaymentService
         return $order->fresh(['items', 'payments']);
     }
 
+    public function syncSubscriptionCheckoutSession(Tenant $tenant, string $sessionId): Tenant
+    {
+        $secretKey = config('services.stripe.secret_key');
+
+        abort_if(blank($secretKey), 500, 'Stripe no está configurado.');
+
+        try {
+            $session = Http::withToken($secretKey)
+                ->timeout(20)
+                ->get("https://api.stripe.com/v1/checkout/sessions/{$sessionId}")
+                ->throw()
+                ->json();
+        } catch (RequestException $exception) {
+            $message = data_get($exception->response?->json(), 'error.message', 'No fue posible consultar la sesión de Stripe.');
+            throw new HttpException(422, $message, $exception);
+        }
+
+        abort_unless(
+            data_get($session, 'mode') === 'subscription'
+                || data_get($session, 'metadata.checkout_type') === 'cloudishop_subscription',
+            422,
+            'La sesión de Stripe no corresponde a una suscripción.'
+        );
+
+        abort_unless(
+            (string) data_get($session, 'metadata.tenant_id') === (string) $tenant->id,
+            403,
+            'La sesión de Stripe no pertenece a esta tienda.'
+        );
+
+        abort_unless(
+            data_get($session, 'payment_status') === 'paid',
+            422,
+            'La sesión de Stripe todavía no aparece como pagada.'
+        );
+
+        $this->handleSubscriptionCheckoutSessionCompleted($session);
+
+        $subscriptionId = (string) data_get($session, 'subscription');
+
+        if (filled($subscriptionId)) {
+            $this->syncStripeSubscriptionById($subscriptionId, $secretKey);
+        }
+
+        return $tenant->fresh();
+    }
+
     protected function handleCheckoutSessionCompleted(array $session): void
     {
+        if (data_get($session, 'mode') === 'subscription'
+            || data_get($session, 'metadata.checkout_type') === 'cloudishop_subscription') {
+            $this->handleSubscriptionCheckoutSessionCompleted($session);
+
+            return;
+        }
+
         $order = $this->findOrder($session);
 
         if (! $order) {
@@ -230,6 +366,159 @@ class StripePaymentService
         if ($paymentStatus === 'paid') {
             $this->markOrderPaid($order, data_get($session, 'id'), $paymentIntentId);
         }
+    }
+
+    protected function handleSubscriptionCheckoutSessionCompleted(array $session): void
+    {
+        $tenant = tenant();
+        $planKey = (string) data_get($session, 'metadata.plan_key');
+
+        if (blank($planKey)) {
+            return;
+        }
+
+        $tenant->forceFill([
+            'payment_provider' => 'stripe',
+            'provider_customer_id' => data_get($session, 'customer') ?: $tenant->provider_customer_id,
+        ])->save();
+
+        $tenant->activatePlan(
+            $planKey,
+            now()->addMonth(),
+            'stripe',
+            data_get($session, 'subscription')
+        );
+    }
+
+    protected function syncStripeSubscriptionById(string $subscriptionId, string $secretKey): void
+    {
+        try {
+            $subscription = Http::withToken($secretKey)
+                ->timeout(20)
+                ->get("https://api.stripe.com/v1/subscriptions/{$subscriptionId}")
+                ->throw()
+                ->json();
+        } catch (RequestException $exception) {
+            $message = data_get($exception->response?->json(), 'error.message', 'No fue posible consultar la suscripción de Stripe.');
+            throw new HttpException(422, $message, $exception);
+        }
+
+        $this->handleCustomerSubscriptionUpdated($subscription);
+    }
+
+    protected function handleCustomerSubscriptionUpdated(array $subscription): void
+    {
+        $tenant = tenant();
+        $planKey = (string) data_get($subscription, 'metadata.plan_key', $tenant->plan_key);
+        $status = (string) data_get($subscription, 'status');
+        $periodEnd = data_get($subscription, 'current_period_end');
+        $endsAt = $periodEnd ? Carbon::createFromTimestamp((int) $periodEnd) : $tenant->subscription_ends_at;
+
+        $tenant->forceFill([
+            'payment_provider' => 'stripe',
+            'provider_customer_id' => data_get($subscription, 'customer') ?: $tenant->provider_customer_id,
+            'provider_subscription_id' => data_get($subscription, 'id') ?: $tenant->provider_subscription_id,
+            'subscription_ends_at' => $endsAt,
+        ])->save();
+
+        if (in_array($status, ['active', 'trialing'], true)) {
+            $tenant->activatePlan($planKey, $endsAt, 'stripe', data_get($subscription, 'id'));
+
+            return;
+        }
+
+        if (in_array($status, ['past_due', 'unpaid', 'canceled', 'incomplete_expired'], true)) {
+            $tenant->suspendSubscription($status === 'past_due' ? Tenant::STATUS_PAST_DUE : Tenant::STATUS_SUSPENDED);
+        }
+    }
+
+    protected function handleCustomerSubscriptionDeleted(array $subscription): void
+    {
+        $tenant = tenant();
+
+        $tenant->forceFill([
+            'provider_subscription_id' => data_get($subscription, 'id') ?: $tenant->provider_subscription_id,
+            'subscription_ends_at' => data_get($subscription, 'current_period_end')
+                ? Carbon::createFromTimestamp((int) data_get($subscription, 'current_period_end'))
+                : $tenant->subscription_ends_at,
+        ])->save();
+
+        $tenant->suspendSubscription(Tenant::STATUS_CANCELED);
+    }
+
+    protected function handleInvoicePaid(array $invoice): void
+    {
+        $tenant = tenant();
+        $this->syncSubscriptionInvoice($tenant, $invoice, 'paid');
+
+        $planKey = (string) data_get($invoice, 'subscription_details.metadata.plan_key', $tenant->plan_key);
+        $periodEnd = data_get($invoice, 'lines.data.0.period.end');
+        $subscriptionId = data_get($invoice, 'subscription')
+            ?: data_get($invoice, 'parent.subscription_details.subscription')
+            ?: $tenant->provider_subscription_id;
+
+        $tenant->activatePlan(
+            $planKey,
+            $periodEnd ? Carbon::createFromTimestamp((int) $periodEnd) : now()->addMonth(),
+            'stripe',
+            $subscriptionId
+        );
+
+        $tenant->forceFill([
+            'provider_customer_id' => data_get($invoice, 'customer') ?: $tenant->provider_customer_id,
+        ])->save();
+    }
+
+    protected function handleInvoicePaymentFailed(array $invoice): void
+    {
+        $tenant = tenant();
+        $this->syncSubscriptionInvoice($tenant, $invoice, 'payment_failed');
+
+        $tenant->forceFill([
+            'provider_customer_id' => data_get($invoice, 'customer') ?: $tenant->provider_customer_id,
+            'provider_subscription_id' => data_get($invoice, 'subscription')
+                ?: data_get($invoice, 'parent.subscription_details.subscription')
+                ?: $tenant->provider_subscription_id,
+        ])->save();
+
+        $tenant->suspendSubscription(Tenant::STATUS_PAST_DUE);
+    }
+
+    protected function syncSubscriptionInvoice(Tenant $tenant, array $invoice, string $status): void
+    {
+        $invoiceId = data_get($invoice, 'id');
+
+        if (blank($invoiceId)) {
+            return;
+        }
+
+        $amount = data_get($invoice, 'amount_paid', data_get($invoice, 'amount_due', 0));
+        $periodStart = data_get($invoice, 'lines.data.0.period.start');
+        $periodEnd = data_get($invoice, 'lines.data.0.period.end');
+        $subscriptionId = data_get($invoice, 'subscription')
+            ?: data_get($invoice, 'parent.subscription_details.subscription')
+            ?: $tenant->provider_subscription_id;
+
+        SubscriptionPayment::updateOrCreate(
+            [
+                'provider' => 'stripe',
+                'provider_invoice_id' => $invoiceId,
+            ],
+            [
+                'tenant_id' => $tenant->id,
+                'provider_subscription_id' => $subscriptionId,
+                'provider_customer_id' => data_get($invoice, 'customer') ?: $tenant->provider_customer_id,
+                'status' => $status,
+                'amount' => round(((int) $amount) / 100, 2),
+                'currency' => strtoupper((string) data_get($invoice, 'currency', 'mxn')),
+                'period_start' => $periodStart ? Carbon::createFromTimestamp((int) $periodStart) : null,
+                'period_end' => $periodEnd ? Carbon::createFromTimestamp((int) $periodEnd) : null,
+                'paid_at' => $status === 'paid' ? now() : null,
+                'hosted_invoice_url' => data_get($invoice, 'hosted_invoice_url'),
+                'invoice_pdf' => data_get($invoice, 'invoice_pdf'),
+                'provider_payload' => $invoice,
+            ]
+        );
     }
 
     protected function handlePaymentIntentSucceeded(array $paymentIntent): void
@@ -280,7 +569,6 @@ class StripePaymentService
         if ($order->payment_status === Order::PAYMENT_PAID) {
             $this->deductOrderStock($order->fresh(['items.product']));
             $this->activateCashbackTransactions($order);
-            $this->orderNotificationService->sendPurchaseNotifications($order->fresh(['user.customerProfile', 'user.customerPfrProfile', 'user.defaultAddress', 'items', 'payments']));
 
             return;
         }
@@ -298,6 +586,129 @@ class StripePaymentService
         $this->activateCashbackTransactions($order);
 
         $this->orderNotificationService->sendPurchaseNotifications($order->fresh(['user.customerProfile', 'user.customerPfrProfile', 'user.defaultAddress', 'items', 'payments']));
+    }
+
+    protected function activeCheckoutSessionPayload(Order $order, string $secretKey, ?string $storefrontOrigin = null): ?array
+    {
+        if (blank($order->stripe_session_id)) {
+            return null;
+        }
+
+        try {
+            $session = Http::withToken($secretKey)
+                ->timeout(20)
+                ->get("https://api.stripe.com/v1/checkout/sessions/{$order->stripe_session_id}")
+                ->throw()
+                ->json();
+        } catch (RequestException $exception) {
+            $message = data_get($exception->response?->json(), 'error.message', 'No fue posible consultar la sesión de Stripe.');
+            throw new HttpException(422, $message, $exception);
+        }
+
+        if (data_get($session, 'payment_status') === 'paid') {
+            $this->handleCheckoutSessionCompleted($session);
+
+            abort(422, 'El pedido ya fue pagado.');
+        }
+
+        if (data_get($session, 'status') === 'open' && filled(data_get($session, 'url'))) {
+            if (! $this->sessionMatchesStorefrontOrigin($session, $storefrontOrigin)) {
+                $this->expireStripeSessionById((string) data_get($session, 'id'), $secretKey, $session);
+
+                return null;
+            }
+
+            $this->syncPendingPaymentFromSession($order, $session);
+
+            return [
+                'order_id' => $order->id,
+                'order_number' => $order->number,
+                'stripe_session_id' => data_get($session, 'id'),
+                'stripe_payment_intent_id' => data_get($session, 'payment_intent'),
+                'url' => data_get($session, 'url'),
+                'payment_status' => $order->payment_status,
+                'amount' => (float) $order->total,
+                'currency' => strtolower($order->currency),
+                'reused' => true,
+            ];
+        }
+
+        $this->markPaymentSessionExpired($order->stripe_session_id, $session);
+
+        return null;
+    }
+
+    protected function expireStripeSessionById(string $sessionId, string $secretKey, ?array $session = null): void
+    {
+        Http::asForm()
+            ->withToken($secretKey)
+            ->timeout(10)
+            ->post("https://api.stripe.com/v1/checkout/sessions/{$sessionId}/expire");
+
+        $this->markPaymentSessionExpired($sessionId, $session);
+    }
+
+    protected function sessionMatchesStorefrontOrigin(array $session, ?string $storefrontOrigin = null): bool
+    {
+        if (blank($storefrontOrigin)) {
+            return true;
+        }
+
+        $successUrl = (string) data_get($session, 'success_url');
+
+        return str_starts_with($successUrl, rtrim($storefrontOrigin, '/') . '/');
+    }
+
+    protected function syncPendingPaymentFromSession(Order $order, array $session): void
+    {
+        $order->forceFill([
+            'stripe_session_id' => data_get($session, 'id'),
+            'stripe_payment_intent_id' => data_get($session, 'payment_intent'),
+            'payment_method' => 'stripe',
+        ])->save();
+
+        Payment::updateOrCreate(
+            [
+                'provider' => 'stripe',
+                'stripe_session_id' => data_get($session, 'id'),
+            ],
+            [
+                'order_id' => $order->id,
+                'status' => Order::PAYMENT_PENDING,
+                'payment_method' => 'stripe',
+                'stripe_payment_intent_id' => data_get($session, 'payment_intent'),
+                'amount' => (float) $order->total,
+                'currency' => strtoupper($order->currency),
+                'provider_payload' => $session,
+            ]
+        );
+    }
+
+    protected function markPaymentSessionExpired(?string $sessionId, ?array $session = null): void
+    {
+        if (blank($sessionId)) {
+            return;
+        }
+
+        $payment = Payment::query()
+            ->where('provider', 'stripe')
+            ->where('stripe_session_id', $sessionId)
+            ->first();
+
+        if (! $payment || $payment->status === Order::PAYMENT_PAID) {
+            return;
+        }
+
+        $payload = $payment->provider_payload ?? [];
+
+        if ($session) {
+            $payload = array_replace_recursive($payload, $session);
+        }
+
+        $payment->forceFill([
+            'status' => 'expired',
+            'provider_payload' => $payload,
+        ])->save();
     }
 
     protected function activateCashbackTransactions(Order $order): void
@@ -419,6 +830,32 @@ class StripePaymentService
             ->first();
     }
 
+    protected function stripeMetadata(Order $order): array
+    {
+        return [
+            'tenant_id' => (string) tenant('id'),
+            'order_id' => (string) $order->id,
+            'order_number' => $order->number,
+            'user_id' => (string) $order->user_id,
+        ];
+    }
+
+    protected function resolveTenantFromWebhookEvent(array $event): Tenant
+    {
+        $object = data_get($event, 'data.object', []);
+        $tenantId = data_get($object, 'metadata.tenant_id')
+            ?: data_get($object, 'subscription_details.metadata.tenant_id')
+            ?: data_get($object, 'parent.subscription_details.metadata.tenant_id');
+
+        abort_if(blank($tenantId), 400, 'El evento de Stripe no incluye tenant_id.');
+
+        $tenant = Tenant::query()->find($tenantId);
+
+        abort_unless($tenant, 404, 'Tenant no encontrado para el evento de Stripe.');
+
+        return $tenant;
+    }
+
     protected function lineItems(Order $order): array
     {
         return [[
@@ -437,15 +874,45 @@ class StripePaymentService
         ]];
     }
 
-    protected function cancelUrl(Order $order): string
+    protected function successUrl(?string $storefrontOrigin = null): string
     {
-        $url = (string) config('services.stripe.cancel_url');
+        if (filled($storefrontOrigin)) {
+            return rtrim($storefrontOrigin, '/') . '/checkout/success?session_id={CHECKOUT_SESSION_ID}';
+        }
+
+        return (string) config('services.stripe.success_url');
+    }
+
+    protected function cancelUrl(Order $order, ?string $storefrontOrigin = null): string
+    {
+        $url = filled($storefrontOrigin)
+            ? rtrim($storefrontOrigin, '/') . '/checkout/cancel'
+            : (string) config('services.stripe.cancel_url');
+
         $separator = Str::contains($url, '?') ? '&' : '?';
 
         return $url . $separator . http_build_query([
             'order_id' => $order->id,
             'order_number' => $order->number,
         ]);
+    }
+
+    protected function subscriptionSuccessUrl(?string $billingOrigin = null): string
+    {
+        if (filled($billingOrigin)) {
+            return rtrim($billingOrigin, '/') . '/billing/success?session_id={CHECKOUT_SESSION_ID}';
+        }
+
+        return (string) config('services.stripe.subscription_success_url');
+    }
+
+    protected function subscriptionCancelUrl(?string $billingOrigin = null): string
+    {
+        if (filled($billingOrigin)) {
+            return rtrim($billingOrigin, '/') . '/billing/cancel';
+        }
+
+        return (string) config('services.stripe.subscription_cancel_url');
     }
 
     protected function validateSignature(string $payload, ?string $signatureHeader): void

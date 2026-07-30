@@ -65,11 +65,7 @@ class AuthController extends BaseApiController
             $request->input('device_name', 'react-web')
         )->plainTextToken;
 
-        $modules = $user->role->modules
-            ->where('is_active', true)
-            ->pluck('name')
-            ->values()
-            ->toArray();
+        $modules = $this->accessibleModules($user);
 
         return response()->json([
             'ok' => true,
@@ -130,11 +126,7 @@ class AuthController extends BaseApiController
             $request->input('device_name', 'react-web')
         )->plainTextToken;
 
-        $modules = $user->role->modules
-            ->where('is_active', true)
-            ->pluck('name')
-            ->values()
-            ->toArray();
+        $modules = $this->accessibleModules($user);
 
         $isInternal = $user->role->name !== 'cliente';
         $redirectTo = $isInternal ? '/admin' : '/';
@@ -174,11 +166,7 @@ class AuthController extends BaseApiController
             ], 403);
         }
 
-        $modules = $user->role->modules
-            ->where('is_active', true)
-            ->pluck('name')
-            ->values()
-            ->toArray();
+        $modules = $this->accessibleModules($user);
 
         $isInternal = $user->role->name !== 'cliente';
         $redirectTo = $isInternal ? '/admin' : '/';
@@ -276,5 +264,15 @@ class AuthController extends BaseApiController
             'ok' => true,
             'message' => 'Contraseña actualizada correctamente.',
         ]);
+    }
+
+    protected function accessibleModules(User $user): array
+    {
+        return $user->role->modules
+            ->where('is_active', true)
+            ->filter(fn ($module) => ! tenant() || tenant()->hasPlanModule($module->name))
+            ->pluck('name')
+            ->values()
+            ->toArray();
     }
 }

@@ -47,6 +47,7 @@ class BrandBannerController extends Controller
             return response()->json([
                 'ok' => true,
                 'data' => BrandBannerResource::collection($query->get()),
+                'limits' => $this->limitPayload(),
             ]);
         }
 
@@ -63,11 +64,14 @@ class BrandBannerController extends Controller
                 'from' => $brandBanners->firstItem(),
                 'to' => $brandBanners->lastItem(),
             ],
+            'limits' => $this->limitPayload(),
         ]);
     }
 
     public function store(StoreBrandBannerRequest $request): JsonResponse
     {
+        $this->ensureCanCreateBrandBanner();
+
         $data = $request->validated();
         $file = $request->file('media');
 
@@ -180,5 +184,34 @@ class BrandBannerController extends Controller
         }
 
         return $detectedType;
+    }
+
+    protected function ensureCanCreateBrandBanner(): void
+    {
+        $tenant = tenant();
+        $limit = $tenant?->planLimit('brand_banners');
+
+        if ($limit === null) {
+            return;
+        }
+
+        $current = BrandBanner::query()->count();
+
+        abort_if($current >= $limit, 422, "Tu plan permite hasta {$limit} banner(s) de marca.");
+    }
+
+    protected function limitPayload(): array
+    {
+        $limit = tenant()?->planLimit('brand_banners');
+        $current = BrandBanner::query()->count();
+
+        return [
+            'resource' => 'brand_banners',
+            'current' => $current,
+            'limit' => $limit,
+            'remaining' => $limit === null ? null : max(0, $limit - $current),
+            'is_unlimited' => $limit === null,
+            'plan_key' => tenant()?->plan_key,
+        ];
     }
 }
