@@ -24,7 +24,8 @@ return [
         'http://localhost:5174',
         'https://demo.cloudishop.mx',
         'https://www.demo.cloudishop.mx',
-        'https://tuxcroquetitas.com'
+        'https://tuxcroquetitas.com',
+        'https://cloudishop.mx'
     ],
 
     'allowed_origins_patterns' => [
