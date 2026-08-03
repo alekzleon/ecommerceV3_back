@@ -9,6 +9,8 @@ use App\Models\Product;
 use App\Models\StripeWebhookEvent;
 use App\Models\SubscriptionPayment;
 use App\Models\Tenant;
+use App\Models\TenantStripeAccount;
+use App\Models\EcommerceSetting;
 use App\Services\Orders\OrderNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\Client\RequestException;
@@ -35,12 +37,13 @@ class StripePaymentService
 
         $order->loadMissing(['items', 'user']);
         $this->validateOrderStock($order);
+        $stripeAccountId = $this->stripeAccountIdForStoreCheckout();
 
-        if ($existingSession = $this->activeCheckoutSessionPayload($order, $secretKey, $storefrontOrigin)) {
+        if ($existingSession = $this->activeCheckoutSessionPayload($order, $secretKey, $storefrontOrigin, $stripeAccountId)) {
             return $existingSession;
         }
 
-        $stripeMetadata = $this->stripeMetadata($order);
+        $stripeMetadata = $this->stripeMetadata($order, $stripeAccountId);
 
         $payload = [
             'mode' => 'payment',
@@ -58,6 +61,9 @@ class StripePaymentService
         try {
             $session = Http::asForm()
                 ->withToken($secretKey)
+                ->when($stripeAccountId, fn ($request) => $request->withHeaders([
+                    'Stripe-Account' => $stripeAccountId,
+                ]))
                 ->timeout(20)
                 ->post('https://api.stripe.com/v1/checkout/sessions', $this->flatten($payload))
                 ->throw()
@@ -71,7 +77,10 @@ class StripePaymentService
             'stripe_session_id' => data_get($session, 'id'),
             'stripe_payment_intent_id' => data_get($session, 'payment_intent'),
             'payment_method' => 'stripe',
+            'metadata' => $this->orderMetadataWithStripeAccount($order, $stripeAccountId),
         ])->save();
+
+        $providerPayload = $this->providerPayloadWithStripeAccount($session, $stripeAccountId);
 
         Payment::updateOrCreate(
             [
@@ -85,7 +94,7 @@ class StripePaymentService
                 'stripe_payment_intent_id' => data_get($session, 'payment_intent'),
                 'amount' => (float) $order->total,
                 'currency' => strtoupper($order->currency),
-                'provider_payload' => $session,
+                'provider_payload' => $providerPayload,
             ]
         );
 
@@ -98,6 +107,8 @@ class StripePaymentService
             'payment_status' => $order->payment_status,
             'amount' => (float) $order->total,
             'currency' => strtolower($order->currency),
+            'stripe_account_id' => $stripeAccountId,
+            'charge_type' => $stripeAccountId ? 'direct' : 'platform',
             'reused' => false,
         ];
     }
@@ -255,7 +266,12 @@ class StripePaymentService
         }
 
         try {
-            $this->expireStripeSessionById($order->stripe_session_id, $secretKey);
+            $this->expireStripeSessionById(
+                $order->stripe_session_id,
+                $secretKey,
+                null,
+                $this->stripeAccountIdForOrder($order)
+            );
         } catch (\Throwable) {
             report('No fue posible expirar la sesión de Stripe ' . $order->stripe_session_id);
         }
@@ -267,8 +283,13 @@ class StripePaymentService
 
         abort_if(blank($secretKey), 500, 'Stripe no está configurado.');
 
+        $stripeAccountId = $this->stripeAccountIdForSession($sessionId);
+
         try {
             $session = Http::withToken($secretKey)
+                ->when($stripeAccountId, fn ($request) => $request->withHeaders([
+                    'Stripe-Account' => $stripeAccountId,
+                ]))
                 ->timeout(20)
                 ->get("https://api.stripe.com/v1/checkout/sessions/{$sessionId}")
                 ->throw()
@@ -588,14 +609,19 @@ class StripePaymentService
         $this->orderNotificationService->sendPurchaseNotifications($order->fresh(['user.customerProfile', 'user.customerPfrProfile', 'user.defaultAddress', 'items', 'payments']));
     }
 
-    protected function activeCheckoutSessionPayload(Order $order, string $secretKey, ?string $storefrontOrigin = null): ?array
+    protected function activeCheckoutSessionPayload(Order $order, string $secretKey, ?string $storefrontOrigin = null, ?string $stripeAccountId = null): ?array
     {
         if (blank($order->stripe_session_id)) {
             return null;
         }
 
+        $stripeAccountId ??= $this->stripeAccountIdForOrder($order);
+
         try {
             $session = Http::withToken($secretKey)
+                ->when($stripeAccountId, fn ($request) => $request->withHeaders([
+                    'Stripe-Account' => $stripeAccountId,
+                ]))
                 ->timeout(20)
                 ->get("https://api.stripe.com/v1/checkout/sessions/{$order->stripe_session_id}")
                 ->throw()
@@ -613,7 +639,7 @@ class StripePaymentService
 
         if (data_get($session, 'status') === 'open' && filled(data_get($session, 'url'))) {
             if (! $this->sessionMatchesStorefrontOrigin($session, $storefrontOrigin)) {
-                $this->expireStripeSessionById((string) data_get($session, 'id'), $secretKey, $session);
+                $this->expireStripeSessionById((string) data_get($session, 'id'), $secretKey, $session, $stripeAccountId);
 
                 return null;
             }
@@ -629,6 +655,8 @@ class StripePaymentService
                 'payment_status' => $order->payment_status,
                 'amount' => (float) $order->total,
                 'currency' => strtolower($order->currency),
+                'stripe_account_id' => $stripeAccountId,
+                'charge_type' => $stripeAccountId ? 'direct' : 'platform',
                 'reused' => true,
             ];
         }
@@ -638,10 +666,13 @@ class StripePaymentService
         return null;
     }
 
-    protected function expireStripeSessionById(string $sessionId, string $secretKey, ?array $session = null): void
+    protected function expireStripeSessionById(string $sessionId, string $secretKey, ?array $session = null, ?string $stripeAccountId = null): void
     {
         Http::asForm()
             ->withToken($secretKey)
+            ->when($stripeAccountId, fn ($request) => $request->withHeaders([
+                'Stripe-Account' => $stripeAccountId,
+            ]))
             ->timeout(10)
             ->post("https://api.stripe.com/v1/checkout/sessions/{$sessionId}/expire");
 
@@ -661,10 +692,13 @@ class StripePaymentService
 
     protected function syncPendingPaymentFromSession(Order $order, array $session): void
     {
+        $stripeAccountId = $this->stripeAccountIdForOrder($order);
+
         $order->forceFill([
             'stripe_session_id' => data_get($session, 'id'),
             'stripe_payment_intent_id' => data_get($session, 'payment_intent'),
             'payment_method' => 'stripe',
+            'metadata' => $this->orderMetadataWithStripeAccount($order, $stripeAccountId),
         ])->save();
 
         Payment::updateOrCreate(
@@ -679,7 +713,7 @@ class StripePaymentService
                 'stripe_payment_intent_id' => data_get($session, 'payment_intent'),
                 'amount' => (float) $order->total,
                 'currency' => strtoupper($order->currency),
-                'provider_payload' => $session,
+                'provider_payload' => $this->providerPayloadWithStripeAccount($session, $stripeAccountId),
             ]
         );
     }
@@ -807,7 +841,10 @@ class StripePaymentService
             'amount' => $data['amount'],
             'currency' => $data['currency'],
             'paid_at' => $data['status'] === Order::PAYMENT_PAID ? now() : null,
-            'provider_payload' => $data['payload'],
+            'provider_payload' => $this->providerPayloadWithStripeAccount(
+                $data['payload'],
+                $this->stripeAccountIdForOrder($order)
+            ),
         ])->save();
 
         return $payment;
@@ -830,14 +867,86 @@ class StripePaymentService
             ->first();
     }
 
-    protected function stripeMetadata(Order $order): array
+    protected function stripeMetadata(Order $order, ?string $stripeAccountId = null): array
     {
-        return [
+        $metadata = [
             'tenant_id' => (string) tenant('id'),
             'order_id' => (string) $order->id,
             'order_number' => $order->number,
             'user_id' => (string) $order->user_id,
+            'checkout_type' => 'store_order',
         ];
+
+        if (filled($stripeAccountId)) {
+            $metadata['stripe_account_id'] = $stripeAccountId;
+            $metadata['charge_type'] = 'direct';
+        }
+
+        return $metadata;
+    }
+
+    protected function stripeAccountIdForStoreCheckout(): ?string
+    {
+        abort_unless(
+            (bool) data_get(EcommerceSetting::paymentMethodSettings(), 'methods.stripe.enabled', false),
+            422,
+            'El método de pago con Stripe no está activo para esta tienda.'
+        );
+
+        $connectAccount = tenant()?->stripeAccount;
+
+        if (! $connectAccount || ! $connectAccount->isReadyForCharges()) {
+            abort(422, 'La tienda debe conectar y completar Stripe antes de recibir pagos.');
+        }
+
+        return $connectAccount->stripe_account_id;
+    }
+
+    protected function stripeAccountIdForSession(string $sessionId): ?string
+    {
+        $payment = Payment::query()
+            ->where('provider', 'stripe')
+            ->where('stripe_session_id', $sessionId)
+            ->first();
+
+        if ($payment) {
+            return data_get($payment->provider_payload, '_cloudishop_connect.stripe_account_id')
+                ?: data_get($payment->provider_payload, 'metadata.stripe_account_id');
+        }
+
+        $order = Order::query()->where('stripe_session_id', $sessionId)->first();
+
+        return $order ? $this->stripeAccountIdForOrder($order) : null;
+    }
+
+    protected function stripeAccountIdForOrder(Order $order): ?string
+    {
+        return data_get($order->metadata, 'stripe_connect.stripe_account_id')
+            ?: data_get($order->metadata, 'stripe_account_id');
+    }
+
+    protected function orderMetadataWithStripeAccount(Order $order, ?string $stripeAccountId): array
+    {
+        $metadata = $order->metadata ?? [];
+
+        if (filled($stripeAccountId)) {
+            data_set($metadata, 'stripe_connect.stripe_account_id', $stripeAccountId);
+            data_set($metadata, 'stripe_connect.charge_type', 'direct');
+        }
+
+        return $metadata;
+    }
+
+    protected function providerPayloadWithStripeAccount(array $payload, ?string $stripeAccountId): array
+    {
+        if (filled($stripeAccountId)) {
+            $payload['_cloudishop_connect'] = [
+                'stripe_account_id' => $stripeAccountId,
+                'charge_type' => 'direct',
+            ];
+        }
+
+        return $payload;
     }
 
     protected function resolveTenantFromWebhookEvent(array $event): Tenant

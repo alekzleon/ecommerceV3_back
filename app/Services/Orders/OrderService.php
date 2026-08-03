@@ -61,6 +61,12 @@ class OrderService
                     'orden_compra' => $ordenCompra,
                     'folio_microsip' => $folioMicrosip,
                     'sales_channel' => $salesChannel,
+                    'items_count' => (int) round((float) data_get($preview, 'totals.items_count', 0)),
+                    'subtotal' => data_get($preview, 'totals.subtotal', 0),
+                    'discount' => data_get($preview, 'totals.discount', 0),
+                    'tax' => data_get($preview, 'totals.tax', 0),
+                    'shipping' => data_get($preview, 'totals.shipping', 0),
+                    'total' => data_get($preview, 'totals.total', 0),
                     'shipping_address_snapshot' => data_get($preview, 'shipping.selected_address'),
                     'document_notes' => $documentNotes,
                     'metadata' => array_merge($existingOrder->metadata ?? [], [
@@ -70,6 +76,8 @@ class OrderService
                         'sales_channel_tracking' => data_get($cart->metadata, 'sales_channel_tracking', []),
                         'dir_cli_id' => data_get($preview, 'shipping.selected_address.dir_cli_id'),
                         'document_notes' => $documentNotes,
+                        'shipping_details' => data_get($preview, 'totals.shipping_details', []),
+                        'tax_breakdown' => data_get($preview, 'totals.tax_breakdown', []),
                     ]),
                 ])->save();
 
@@ -104,6 +112,7 @@ class OrderService
                     'coupon' => data_get($preview, 'coupon'),
                     'loyalty' => data_get($preview, 'loyalty', []),
                     'tax_breakdown' => data_get($preview, 'totals.tax_breakdown', []),
+                    'shipping_details' => data_get($preview, 'totals.shipping_details', []),
                 ],
             ]);
 

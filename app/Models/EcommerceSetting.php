@@ -15,6 +15,8 @@ class EcommerceSetting extends Model
     public const KEY_META_PIXEL = 'meta_pixel';
     public const KEY_ABANDONED_CART = 'abandoned_cart';
     public const KEY_SALE_NOTIFICATIONS = 'sale_notifications';
+    public const KEY_PAYMENT_METHODS = 'payment_methods';
+    public const KEY_SHIPPING = 'shipping';
     public const KEY_HOME_BENEFIT_PREFIX = 'home_benefit_';
     public const KEY_STOREFRONT = 'storefront';
     public const KEY_HOME_TEMPLATE = 'home_template';
@@ -72,6 +74,65 @@ class EcommerceSetting extends Model
         $settings['admin_whatsapp'] = filled($settings['admin_whatsapp'])
             ? preg_replace('/\D+/', '', (string) $settings['admin_whatsapp'])
             : null;
+
+        return $settings;
+    }
+
+    public static function paymentMethodSettings(): array
+    {
+        $settings = array_replace_recursive([
+            'default_method' => 'stripe',
+            'methods' => [
+                'stripe' => [
+                    'enabled' => false,
+                    'label' => 'Tarjeta de crédito o débito',
+                    'provider' => 'stripe_connect',
+                ],
+            ],
+        ], static::getValue(static::KEY_PAYMENT_METHODS, []));
+
+        $settings['methods']['stripe']['enabled'] = (bool) data_get($settings, 'methods.stripe.enabled', false);
+        $settings['methods']['stripe']['label'] = data_get($settings, 'methods.stripe.label') ?: 'Tarjeta de crédito o débito';
+        $settings['methods']['stripe']['provider'] = 'stripe_connect';
+
+        if (! array_key_exists((string) ($settings['default_method'] ?? ''), $settings['methods'])) {
+            $settings['default_method'] = 'stripe';
+        }
+
+        return $settings;
+    }
+
+    public static function setStripePaymentEnabled(bool $enabled): self
+    {
+        $settings = static::paymentMethodSettings();
+        $settings['methods']['stripe']['enabled'] = $enabled;
+
+        return static::setValue(static::KEY_PAYMENT_METHODS, $settings);
+    }
+
+    public static function shippingSettings(): array
+    {
+        $settings = array_merge([
+            'enabled' => true,
+            'label' => 'Envío estándar',
+            'default_cost' => 0.0,
+            'free_shipping_minimum_enabled' => false,
+            'free_shipping_minimum' => null,
+        ], static::getValue(static::KEY_SHIPPING, []));
+
+        $settings['enabled'] = (bool) data_get($settings, 'enabled', true);
+        $settings['label'] = filled(data_get($settings, 'label'))
+            ? trim((string) $settings['label'])
+            : 'Envío estándar';
+        $settings['default_cost'] = max(0, round((float) data_get($settings, 'default_cost', 0), 2));
+        $settings['free_shipping_minimum_enabled'] = (bool) data_get($settings, 'free_shipping_minimum_enabled', false);
+        $settings['free_shipping_minimum'] = data_get($settings, 'free_shipping_minimum') !== null
+            ? max(0, round((float) $settings['free_shipping_minimum'], 2))
+            : null;
+
+        if (! $settings['free_shipping_minimum_enabled']) {
+            $settings['free_shipping_minimum'] = null;
+        }
 
         return $settings;
     }

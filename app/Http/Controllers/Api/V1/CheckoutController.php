@@ -312,6 +312,8 @@ class CheckoutController extends Controller
             'total' => (float) $order->total,
             'stripe_session_id' => $order->stripe_session_id,
             'stripe_payment_intent_id' => $order->stripe_payment_intent_id,
+            'stripe_account_id' => data_get($order->metadata, 'stripe_connect.stripe_account_id'),
+            'charge_type' => data_get($order->metadata, 'stripe_connect.charge_type', 'platform'),
             'paid_at' => $order->paid_at,
             'promotions_applied' => data_get($order->metadata, 'promotions_applied', []),
             'coupon' => data_get($order->metadata, 'coupon'),

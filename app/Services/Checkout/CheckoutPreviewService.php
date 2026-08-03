@@ -4,6 +4,7 @@ namespace App\Services\Checkout;
 
 use App\Models\Cart;
 use App\Models\CartItem;
+use App\Models\EcommerceSetting;
 use App\Models\UserAddress;
 use Illuminate\Support\Collection;
 
@@ -19,9 +20,11 @@ class CheckoutPreviewService
         ]);
 
         $items = $cart->items->values();
-        $shipping = $this->buildShipping($cart, $addressId, $dirCliId);
+        $shippingCharge = $this->shippingCharge($cart);
+        $shipping = $this->buildShipping($cart, $shippingCharge, $addressId, $dirCliId);
         $blockers = $this->blockers($cart, $items, $shipping['selected_address']);
         $checkoutItems = $items->map(fn (CartItem $item, int $index) => $this->buildItem($item, $index + 1))->values();
+        $totals = $this->buildTotals($cart, $checkoutItems, $shippingCharge);
 
         return [
             'cart_id' => $cart->id,
@@ -48,10 +51,10 @@ class CheckoutPreviewService
                 'document_type' => 'checkout_preview',
                 'currency' => $cart->currency,
                 'lines' => $checkoutItems,
-                'totals' => $this->buildTotals($cart, $checkoutItems),
+                'totals' => $totals,
                 'notes' => $this->buildInvoiceNotes($checkoutItems),
             ],
-            'totals' => $this->buildTotals($cart, $checkoutItems),
+            'totals' => $totals,
         ];
     }
 
@@ -107,7 +110,7 @@ class CheckoutPreviewService
         return $blockers;
     }
 
-    protected function buildShipping(Cart $cart, ?int $addressId = null, ?int $dirCliId = null): array
+    protected function buildShipping(Cart $cart, array $shippingCharge, ?int $addressId = null, ?int $dirCliId = null): array
     {
         $addresses = $cart->user?->addresses
             ? $cart->user->addresses->sortByDesc('is_default')->sortByDesc('id')->values()
@@ -129,6 +132,19 @@ class CheckoutPreviewService
             'selected_address' => $address ? $this->addressPayload($address) : null,
             'addresses' => $addresses->map(fn (UserAddress $userAddress) => $this->addressPayload($userAddress))->values(),
             'can_choose_address' => $addresses->count() > 1,
+            'method' => [
+                'key' => 'standard',
+                'label' => $shippingCharge['label'],
+            ],
+            'enabled' => $shippingCharge['enabled'],
+            'amount' => $shippingCharge['amount'],
+            'base_amount' => $shippingCharge['base_amount'],
+            'is_free' => $shippingCharge['is_free'],
+            'free_shipping_minimum_enabled' => $shippingCharge['free_shipping_minimum_enabled'],
+            'free_shipping_minimum' => $shippingCharge['free_shipping_minimum'],
+            'qualifying_amount' => $shippingCharge['qualifying_amount'],
+            'remaining_for_free_shipping' => $shippingCharge['remaining_for_free_shipping'],
+            'free_shipping_basis' => 'subtotal_after_item_discounts',
             'message' => $address
                 ? 'Dirección de envío seleccionada.'
                 : 'Agrega o selecciona una dirección de envío para continuar.',
@@ -326,9 +342,12 @@ class CheckoutPreviewService
         }, $grouped));
     }
 
-    protected function buildTotals(Cart $cart, Collection $checkoutItems): array
+    protected function buildTotals(Cart $cart, Collection $checkoutItems, array $shippingCharge): array
     {
         $giftLineTotal = round((float) $checkoutItems->sum('gift_line_total'), 2);
+        $cartTotal = round((float) $cart->total_snapshot, 2);
+        $shippingAmount = round((float) $shippingCharge['amount'], 2);
+        $total = max(0, round($cartTotal + $shippingAmount, 2));
 
         return [
             'items_count' => (float) $cart->items_count,
@@ -339,15 +358,56 @@ class CheckoutPreviewService
                 'total' => 0.0,
                 'items' => [],
             ]),
-            'shipping' => 0.0,
+            'shipping' => $shippingAmount,
+            'shipping_details' => $shippingCharge,
             'gift_accounting_total' => $giftLineTotal,
             'loyalty' => data_get($cart->metadata, 'loyalty', [
                 'first_purchase_discount' => null,
                 'cashback' => null,
             ]),
             'coupon' => data_get($cart->metadata, 'coupon'),
-            'total' => round((float) $cart->total_snapshot, 2),
-            'amount_due' => round((float) $cart->total_snapshot, 2),
+            'total' => $total,
+            'amount_due' => $total,
+        ];
+    }
+
+    protected function shippingCharge(Cart $cart): array
+    {
+        $settings = EcommerceSetting::shippingSettings();
+        $enabled = (bool) data_get($settings, 'enabled', true);
+        $baseAmount = $enabled ? round((float) data_get($settings, 'default_cost', 0), 2) : 0.0;
+        $qualifyingAmount = max(0, round(
+            (float) $cart->subtotal_snapshot - (float) $cart->discount_snapshot,
+            2
+        ));
+        $freeShippingMinimumEnabled = (bool) data_get($settings, 'free_shipping_minimum_enabled', false);
+        $freeShippingMinimum = data_get($settings, 'free_shipping_minimum');
+        $freeShippingMinimum = $freeShippingMinimum !== null ? round((float) $freeShippingMinimum, 2) : null;
+        $isFree = $enabled
+            && $baseAmount > 0
+            && $freeShippingMinimumEnabled
+            && $freeShippingMinimum !== null
+            && $qualifyingAmount >= $freeShippingMinimum;
+        $amount = $isFree ? 0.0 : $baseAmount;
+        $remainingForFreeShipping = $enabled
+            && $baseAmount > 0
+            && $freeShippingMinimumEnabled
+            && $freeShippingMinimum !== null
+            && ! $isFree
+                ? max(0, round($freeShippingMinimum - $qualifyingAmount, 2))
+                : 0.0;
+
+        return [
+            'enabled' => $enabled,
+            'label' => data_get($settings, 'label', 'Envío estándar'),
+            'amount' => $amount,
+            'base_amount' => $baseAmount,
+            'is_free' => $isFree || ($enabled && $baseAmount <= 0),
+            'free_shipping_minimum_enabled' => $freeShippingMinimumEnabled,
+            'free_shipping_minimum' => $freeShippingMinimum,
+            'qualifying_amount' => $qualifyingAmount,
+            'remaining_for_free_shipping' => $remainingForFreeShipping,
+            'free_shipping_basis' => 'subtotal_after_item_discounts',
         ];
     }
 

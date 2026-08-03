@@ -7,6 +7,7 @@ use Stancl\Tenancy\Database\Concerns\HasDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDomains;
 use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
@@ -89,6 +90,11 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     public function subscriptionPayments(): HasMany
     {
         return $this->hasMany(SubscriptionPayment::class);
+    }
+
+    public function stripeAccount(): HasOne
+    {
+        return $this->hasOne(TenantStripeAccount::class);
     }
 
     public function activatePlan(string $planKey, mixed $endsAt = null, ?string $provider = null, ?string $providerSubscriptionId = null): void

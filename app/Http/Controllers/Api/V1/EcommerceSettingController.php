@@ -56,6 +56,44 @@ class EcommerceSettingController extends Controller
         ]);
     }
 
+    public function paymentMethods(): JsonResponse
+    {
+        $settings = EcommerceSetting::paymentMethodSettings();
+        $connectPayload = app(\App\Services\Payments\StripeConnectService::class)
+            ->payload(tenant()->stripeAccount);
+
+        $stripeEnabled = (bool) data_get($settings, 'methods.stripe.enabled', false);
+        $stripeAvailable = (bool) data_get($connectPayload, 'ready_for_charges', false);
+        $stripeActive = $stripeEnabled && $stripeAvailable;
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_PAYMENT_METHODS,
+                'value' => [
+                    'default_method' => $stripeActive ? ($settings['default_method'] ?? 'stripe') : null,
+                    'methods' => $stripeActive ? [[
+                        'key' => 'stripe',
+                        'label' => data_get($settings, 'methods.stripe.label', 'Tarjeta de crédito o débito'),
+                        'provider' => 'stripe_connect',
+                        'active' => true,
+                    ]] : [],
+                ],
+            ],
+        ]);
+    }
+
+    public function shipping(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_SHIPPING,
+                'value' => EcommerceSetting::shippingSettings(),
+            ],
+        ]);
+    }
+
     public function navTitle(): JsonResponse
     {
         return response()->json([

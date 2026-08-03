@@ -20,11 +20,13 @@ use App\Http\Controllers\Api\V1\ContactFaqController;
 use App\Http\Controllers\Api\V1\ContactLeadController;
 use App\Http\Controllers\Api\V1\EcommerceSettingController;
 use App\Http\Controllers\Api\V1\HomeController;
+use App\Http\Controllers\Api\V1\StripeConnectWebhookController;
 use App\Http\Controllers\Api\V1\StripeWebhookController;
 use App\Http\Controllers\Api\V1\SiteSettingController;
 use App\Http\Controllers\Api\V1\Platform\AdminAuthController as PlatformAdminAuthController;
 use App\Http\Controllers\Api\V1\Platform\AdminTenantController as PlatformAdminTenantController;
 use App\Http\Controllers\Api\V1\Platform\TenantController as PlatformTenantController;
+use App\Http\Controllers\Api\V1\Platform\TenantStripeConnectController;
 use App\Http\Controllers\Api\V1\Account\AddressController;
 use App\Http\Controllers\Api\V1\Account\OrderController as AccountOrderController;
 use App\Http\Controllers\Api\V1\Account\FavoriteController;
@@ -146,6 +148,10 @@ Route::prefix('v1')->group(function () {
         Route::get('/tenant/subscription/plans', [PlatformTenantController::class, 'tenantPlans']);
         Route::post('/tenant/subscription/checkout', [PlatformTenantController::class, 'createSubscriptionCheckout']);
         Route::post('/tenant/subscription/checkout/confirm', [PlatformTenantController::class, 'confirmSubscriptionCheckout']);
+
+        Route::get('/tenant/stripe-connect/status', [TenantStripeConnectController::class, 'status']);
+        Route::post('/tenant/stripe-connect/account', [TenantStripeConnectController::class, 'account']);
+        Route::post('/tenant/stripe-connect/onboarding-link', [TenantStripeConnectController::class, 'onboardingLink']);
     });
 
     /*
@@ -174,6 +180,8 @@ Route::prefix('v1')->group(function () {
         Route::get('/ecommerce-settings/meta-pixel', [EcommerceSettingController::class, 'metaPixel']);
         Route::get('/ecommerce-settings/abandoned-cart', [EcommerceSettingController::class, 'abandonedCart']);
         Route::get('/ecommerce-settings/sale-notifications', [EcommerceSettingController::class, 'saleNotifications']);
+        Route::get('/ecommerce-settings/payment-methods', [EcommerceSettingController::class, 'paymentMethods']);
+        Route::get('/ecommerce-settings/shipping', [EcommerceSettingController::class, 'shipping']);
         Route::get('/ecommerce-settings/home-benefits', [EcommerceSettingController::class, 'homeBenefits']);
         Route::get('/ecommerce-settings/home-benefits/{benefit}', [EcommerceSettingController::class, 'homeBenefit']);
         Route::get('/contact-faqs', [ContactFaqController::class, 'index']);
@@ -194,6 +202,7 @@ Route::prefix('v1')->group(function () {
     |--------------------------------------------------------------------------
     */
     Route::post('/webhooks/stripe', StripeWebhookController::class);
+    Route::post('/webhooks/stripe/connect', StripeConnectWebhookController::class);
 
     /*
     |--------------------------------------------------------------------------
@@ -850,6 +859,24 @@ Route::prefix('v1')->group(function () {
                     ->middleware('module:configuracion_ecommerce');
 
                 Route::patch('ecommerce-settings/sale-notifications', [AdminEcommerceSettingController::class, 'updateSaleNotifications'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/payment-methods', [AdminEcommerceSettingController::class, 'paymentMethods'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/payment-methods', [AdminEcommerceSettingController::class, 'updatePaymentMethods'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/payment-methods', [AdminEcommerceSettingController::class, 'updatePaymentMethods'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::get('ecommerce-settings/shipping', [AdminEcommerceSettingController::class, 'shipping'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::put('ecommerce-settings/shipping', [AdminEcommerceSettingController::class, 'updateShipping'])
+                    ->middleware('module:configuracion_ecommerce');
+
+                Route::patch('ecommerce-settings/shipping', [AdminEcommerceSettingController::class, 'updateShipping'])
                     ->middleware('module:configuracion_ecommerce');
 
                 Route::get('ecommerce-settings/home-benefits', [AdminEcommerceSettingController::class, 'homeBenefits'])

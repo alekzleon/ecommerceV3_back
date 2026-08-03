@@ -10,7 +10,9 @@ use App\Http\Requests\Admin\UpdateGeneralLogoRequest;
 use App\Http\Requests\Admin\UpdateHomeBenefitRequest;
 use App\Http\Requests\Admin\UpdateMetaPixelSettingRequest;
 use App\Http\Requests\Admin\UpdateNavTitleSettingRequest;
+use App\Http\Requests\Admin\UpdatePaymentSettingRequest;
 use App\Http\Requests\Admin\UpdateSaleNotificationSettingRequest;
+use App\Http\Requests\Admin\UpdateShippingSettingRequest;
 use App\Http\Requests\Admin\UpdateStorefrontSettingRequest;
 use App\Models\EcommerceSetting;
 use App\Models\SiteSetting;
@@ -41,6 +43,14 @@ class EcommerceSettingController extends Controller
                 if (array_key_exists($field, $validated)) {
                     $storefront[$field] = $validated[$field];
                 }
+            }
+
+            if ((bool) data_get($storefront, 'is_published', false)) {
+                abort_unless(
+                    $this->hasActivePaymentMethod(),
+                    422,
+                    'Configura y activa al menos un método de pago antes de publicar la tienda.'
+                );
             }
 
             EcommerceSetting::setValue(EcommerceSetting::KEY_STOREFRONT, $storefront);
@@ -168,6 +178,100 @@ class EcommerceSettingController extends Controller
         ]);
     }
 
+    public function paymentMethods(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_PAYMENT_METHODS,
+                'value' => $this->paymentMethodsPayload(includeInactive: true),
+            ],
+        ]);
+    }
+
+    public function shipping(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_SHIPPING,
+                'value' => EcommerceSetting::shippingSettings(),
+            ],
+        ]);
+    }
+
+    public function updateShipping(UpdateShippingSettingRequest $request): JsonResponse
+    {
+        $settings = EcommerceSetting::shippingSettings();
+        $validated = $request->validated();
+
+        foreach (['enabled', 'label', 'default_cost', 'free_shipping_minimum_enabled', 'free_shipping_minimum'] as $field) {
+            if (array_key_exists($field, $validated)) {
+                $settings[$field] = $validated[$field];
+            }
+        }
+
+        if (! (bool) data_get($settings, 'free_shipping_minimum_enabled', false)) {
+            $settings['free_shipping_minimum'] = null;
+        }
+
+        EcommerceSetting::setValue(EcommerceSetting::KEY_SHIPPING, $settings);
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Configuración de envío actualizada correctamente.',
+            'data' => [
+                'key' => EcommerceSetting::KEY_SHIPPING,
+                'value' => EcommerceSetting::shippingSettings(),
+            ],
+        ]);
+    }
+
+    public function updatePaymentMethods(UpdatePaymentSettingRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $settings = EcommerceSetting::paymentMethodSettings();
+
+        $stripeEnabled = data_get($validated, 'methods.stripe.enabled');
+
+        if (array_key_exists('stripe_enabled', $validated)) {
+            $stripeEnabled = (bool) $validated['stripe_enabled'];
+        }
+
+        if ($stripeEnabled !== null) {
+            if ($stripeEnabled) {
+                $connectAccount = tenant()->stripeAccount;
+
+                abort_unless(
+                    $connectAccount?->isReadyForCharges(),
+                    422,
+                    'Completa la configuración de Stripe antes de activar este método de pago.'
+                );
+            }
+
+            if (! $stripeEnabled && (bool) data_get(EcommerceSetting::storefrontSettings(), 'is_published', false)) {
+                abort(422, 'No puedes desactivar el único método de pago mientras la tienda está publicada.');
+            }
+
+            $settings['methods']['stripe']['enabled'] = (bool) $stripeEnabled;
+        }
+
+        if (array_key_exists('default_method', $validated)) {
+            $settings['default_method'] = $validated['default_method'];
+        }
+
+        EcommerceSetting::setValue(EcommerceSetting::KEY_PAYMENT_METHODS, $settings);
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Métodos de pago actualizados correctamente.',
+            'data' => [
+                'key' => EcommerceSetting::KEY_PAYMENT_METHODS,
+                'value' => $this->paymentMethodsPayload(includeInactive: true),
+            ],
+        ]);
+    }
+
     public function updateSaleNotifications(UpdateSaleNotificationSettingRequest $request): JsonResponse
     {
         $setting = EcommerceSetting::setValue(EcommerceSetting::KEY_SALE_NOTIFICATIONS, $request->validated());
@@ -180,6 +284,57 @@ class EcommerceSettingController extends Controller
                 'value' => EcommerceSetting::saleNotificationSettings(),
             ],
         ]);
+    }
+
+    protected function paymentMethodsPayload(bool $includeInactive = false): array
+    {
+        $settings = EcommerceSetting::paymentMethodSettings();
+        $stripeConnectService = app(\App\Services\Payments\StripeConnectService::class);
+        $connectAccount = tenant()->stripeAccount;
+
+        if ($connectAccount?->stripe_account_id) {
+            $connectAccount = $stripeConnectService->syncAccount($connectAccount);
+        }
+
+        $connectPayload = $stripeConnectService->payload($connectAccount);
+        $stripeEnabled = (bool) data_get($settings, 'methods.stripe.enabled', false);
+        $stripeAvailable = (bool) data_get($connectPayload, 'ready_for_charges', false);
+
+        $methods = [
+            [
+                'key' => 'stripe',
+                'label' => data_get($settings, 'methods.stripe.label', 'Tarjeta de crédito o débito'),
+                'provider' => 'stripe_connect',
+                'enabled' => $stripeEnabled,
+                'available' => $stripeAvailable,
+                'active' => $stripeEnabled && $stripeAvailable,
+                'blocking_reason' => $stripeAvailable
+                    ? null
+                    : (data_get($connectPayload, 'requirements.disabled_reason_label') ?: 'Stripe debe estar conectado y habilitado para recibir pagos.'),
+                'requirements' => data_get($connectPayload, 'requirements'),
+            ],
+        ];
+
+        if (! $includeInactive) {
+            $methods = collect($methods)
+                ->where('active', true)
+                ->values()
+                ->all();
+        }
+
+        return [
+            'default_method' => $settings['default_method'] ?? 'stripe',
+            'methods' => $methods,
+        ];
+    }
+
+    protected function hasActivePaymentMethod(): bool
+    {
+        $settings = EcommerceSetting::paymentMethodSettings();
+        $connectAccount = tenant()->stripeAccount;
+
+        return (bool) data_get($settings, 'methods.stripe.enabled', false)
+            && (bool) $connectAccount?->isReadyForCharges();
     }
 
     public function navTitle(): JsonResponse

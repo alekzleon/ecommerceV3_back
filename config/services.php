@@ -62,6 +62,13 @@ return [
         'cancel_url' => env('STRIPE_CANCEL_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/checkout/cancel'),
         'subscription_success_url' => env('STRIPE_SUBSCRIPTION_SUCCESS_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/billing/success?session_id={CHECKOUT_SESSION_ID}'),
         'subscription_cancel_url' => env('STRIPE_SUBSCRIPTION_CANCEL_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/billing/cancel'),
+        'connect' => [
+            'account_type' => env('STRIPE_CONNECT_ACCOUNT_TYPE', 'standard'),
+            'webhook_secret' => env('STRIPE_CONNECT_WEBHOOK_SECRET'),
+            'require_for_store_checkout' => (bool) env('STRIPE_CONNECT_REQUIRE_FOR_STORE_CHECKOUT', true),
+            'return_path' => env('STRIPE_CONNECT_RETURN_PATH', '/admin/payments/stripe/return'),
+            'refresh_path' => env('STRIPE_CONNECT_REFRESH_PATH', '/admin/payments/stripe/refresh'),
+        ],
     ],
 
 ];
