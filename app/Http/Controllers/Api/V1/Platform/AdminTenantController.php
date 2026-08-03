@@ -174,6 +174,8 @@ class AdminTenantController extends Controller
                 'price' => $tenant->plan['price'] ?? null,
                 'currency' => $tenant->plan['currency'] ?? null,
                 'interval' => $tenant->plan['interval'] ?? null,
+                'default_billing_period' => 'monthly',
+                'billing_options' => $this->billingOptionsPayload($tenant->plan),
             ],
             'status' => $tenant->subscription_status,
             'is_usable' => $tenant->isSubscriptionUsable(),
@@ -205,6 +207,24 @@ class AdminTenantController extends Controller
             'invoice_pdf' => $payment->invoice_pdf,
             'created_at' => $payment->created_at?->toISOString(),
         ];
+    }
+
+    protected function billingOptionsPayload(array $plan): array
+    {
+        return collect($plan['billing_options'] ?? [])
+            ->map(fn (array $option, string $key) => [
+                'key' => $key,
+                'label' => $option['label'] ?? null,
+                'price' => (int) ($option['price'] ?? 0),
+                'amount' => round(((int) ($option['price'] ?? 0)) / 100, 2),
+                'currency' => $option['currency'] ?? ($plan['currency'] ?? 'MXN'),
+                'interval' => $option['interval'] ?? 'month',
+                'months_charged' => (int) ($option['months_charged'] ?? ($key === 'annual' ? 12 : 1)),
+                'months_free' => (int) ($option['months_free'] ?? 0),
+                'savings_label' => $option['savings_label'] ?? null,
+            ])
+            ->values()
+            ->all();
     }
 
     protected function countsPayload($counts): array

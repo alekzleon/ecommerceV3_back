@@ -113,12 +113,19 @@ class StripePaymentService
         ];
     }
 
-    public function createSubscriptionCheckoutSession(Tenant $tenant, string $planKey, ?string $billingOrigin = null, ?string $customerEmail = null): array
+    public function createSubscriptionCheckoutSession(
+        Tenant $tenant,
+        string $planKey,
+        string $billingPeriod = 'monthly',
+        ?string $billingOrigin = null,
+        ?string $customerEmail = null
+    ): array
     {
         $plan = config("plans.plans.{$planKey}");
 
         abort_unless($plan, 422, 'El plan seleccionado no existe.');
-        abort_if((int) ($plan['price'] ?? 0) <= 0, 422, 'El plan seleccionado no requiere pago.');
+        $billingOption = $this->subscriptionBillingOption($plan, $billingPeriod);
+        abort_if((int) ($billingOption['price'] ?? 0) <= 0, 422, 'El plan seleccionado no requiere pago.');
 
         $secretKey = config('services.stripe.secret_key');
 
@@ -127,6 +134,9 @@ class StripePaymentService
         $metadata = [
             'tenant_id' => (string) $tenant->id,
             'plan_key' => $planKey,
+            'billing_period' => $billingOption['key'],
+            'months_charged' => (string) ($billingOption['months_charged'] ?? ''),
+            'months_free' => (string) ($billingOption['months_free'] ?? 0),
             'checkout_type' => 'cloudishop_subscription',
         ];
 
@@ -143,17 +153,18 @@ class StripePaymentService
             ],
             'line_items' => [[
                 'price_data' => [
-                    'currency' => strtolower((string) ($plan['currency'] ?? 'MXN')),
+                    'currency' => strtolower((string) ($billingOption['currency'] ?? $plan['currency'] ?? 'MXN')),
                     'product_data' => [
-                        'name' => 'CloudiShop ' . ($plan['name'] ?? $planKey),
+                        'name' => 'CloudiShop ' . ($plan['name'] ?? $planKey) . ' - ' . ($billingOption['name'] ?? $billingOption['label']),
                         'metadata' => [
                             'plan_key' => $planKey,
+                            'billing_period' => $billingOption['key'],
                         ],
                     ],
                     'recurring' => [
-                        'interval' => (string) ($plan['interval'] ?? 'month'),
+                        'interval' => (string) ($billingOption['interval'] ?? 'month'),
                     ],
-                    'unit_amount' => (int) $plan['price'],
+                    'unit_amount' => (int) $billingOption['price'],
                 ],
                 'quantity' => 1,
             ]],
@@ -179,10 +190,66 @@ class StripePaymentService
         return [
             'tenant_id' => $tenant->id,
             'plan_key' => $planKey,
+            'billing_period' => $billingOption['key'],
             'stripe_session_id' => data_get($session, 'id'),
             'url' => data_get($session, 'url'),
-            'amount' => round(((int) $plan['price']) / 100, 2),
-            'currency' => strtolower((string) ($plan['currency'] ?? 'MXN')),
+            'amount' => round(((int) $billingOption['price']) / 100, 2),
+            'currency' => strtolower((string) ($billingOption['currency'] ?? $plan['currency'] ?? 'MXN')),
+            'interval' => $billingOption['interval'],
+            'months_charged' => $billingOption['months_charged'],
+            'months_free' => $billingOption['months_free'],
+            'savings_label' => $billingOption['savings_label'] ?? null,
+        ];
+    }
+
+    public function cancelSubscription(Tenant $tenant, bool $cancelAtPeriodEnd = true): array
+    {
+        $secretKey = config('services.stripe.secret_key');
+
+        abort_if(blank($secretKey), 500, 'Stripe no está configurado.');
+        abort_if(blank($tenant->provider_subscription_id), 422, 'La tienda no tiene una suscripción activa en Stripe.');
+        abort_unless($tenant->payment_provider === 'stripe', 422, 'La suscripción actual no pertenece a Stripe.');
+
+        $subscriptionId = (string) $tenant->provider_subscription_id;
+
+        try {
+            $subscription = $cancelAtPeriodEnd
+                ? Http::asForm()
+                    ->withToken($secretKey)
+                    ->timeout(20)
+                    ->post("https://api.stripe.com/v1/subscriptions/{$subscriptionId}", [
+                        'cancel_at_period_end' => 'true',
+                    ])
+                    ->throw()
+                    ->json()
+                : Http::withToken($secretKey)
+                    ->timeout(20)
+                    ->delete("https://api.stripe.com/v1/subscriptions/{$subscriptionId}")
+                    ->throw()
+                    ->json();
+        } catch (RequestException $exception) {
+            $message = data_get($exception->response?->json(), 'error.message', 'No fue posible cancelar la suscripción en Stripe.');
+            throw new HttpException(422, $message, $exception);
+        }
+
+        $periodEnd = data_get($subscription, 'current_period_end');
+        $endsAt = $periodEnd ? Carbon::createFromTimestamp((int) $periodEnd) : $tenant->subscription_ends_at;
+
+        $tenant->forceFill([
+            'subscription_status' => $cancelAtPeriodEnd ? Tenant::STATUS_ACTIVE : Tenant::STATUS_CANCELED,
+            'subscription_ends_at' => $endsAt,
+            'suspended_at' => $cancelAtPeriodEnd ? null : now(),
+            'data' => $this->tenantDataWithSubscriptionCancellation($tenant, $subscription),
+        ])->save();
+
+        return [
+            'tenant' => $tenant->fresh(),
+            'stripe_subscription_id' => data_get($subscription, 'id', $subscriptionId),
+            'stripe_status' => data_get($subscription, 'status'),
+            'cancel_at_period_end' => (bool) data_get($subscription, 'cancel_at_period_end', $cancelAtPeriodEnd),
+            'cancel_at' => $this->timestampToIso(data_get($subscription, 'cancel_at')),
+            'canceled_at' => $this->timestampToIso(data_get($subscription, 'canceled_at')),
+            'current_period_end' => $this->timestampToIso($periodEnd),
         ];
     }
 
@@ -405,7 +472,7 @@ class StripePaymentService
 
         $tenant->activatePlan(
             $planKey,
-            now()->addMonth(),
+            $this->fallbackSubscriptionEndsAt((string) data_get($session, 'metadata.billing_period', 'monthly')),
             'stripe',
             data_get($session, 'subscription')
         );
@@ -440,6 +507,7 @@ class StripePaymentService
             'provider_customer_id' => data_get($subscription, 'customer') ?: $tenant->provider_customer_id,
             'provider_subscription_id' => data_get($subscription, 'id') ?: $tenant->provider_subscription_id,
             'subscription_ends_at' => $endsAt,
+            'data' => $this->tenantDataWithSubscriptionCancellation($tenant, $subscription),
         ])->save();
 
         if (in_array($status, ['active', 'trialing'], true)) {
@@ -462,6 +530,7 @@ class StripePaymentService
             'subscription_ends_at' => data_get($subscription, 'current_period_end')
                 ? Carbon::createFromTimestamp((int) data_get($subscription, 'current_period_end'))
                 : $tenant->subscription_ends_at,
+            'data' => $this->tenantDataWithSubscriptionCancellation($tenant, $subscription),
         ])->save();
 
         $tenant->suspendSubscription(Tenant::STATUS_CANCELED);
@@ -540,6 +609,63 @@ class StripePaymentService
                 'provider_payload' => $invoice,
             ]
         );
+    }
+
+    protected function subscriptionBillingOption(array $plan, string $billingPeriod): array
+    {
+        $billingPeriod = in_array($billingPeriod, ['monthly', 'annual'], true) ? $billingPeriod : 'monthly';
+        $options = $plan['billing_options'] ?? [];
+
+        if (isset($options[$billingPeriod])) {
+            return [
+                'key' => $billingPeriod,
+                'name' => $billingPeriod === 'annual' ? 'Anual' : 'Mensual',
+                'label' => $options[$billingPeriod]['label'] ?? ($billingPeriod === 'annual' ? 'Anual' : 'Mensual'),
+                'price' => (int) ($options[$billingPeriod]['price'] ?? 0),
+                'currency' => $options[$billingPeriod]['currency'] ?? ($plan['currency'] ?? 'MXN'),
+                'interval' => $options[$billingPeriod]['interval'] ?? ($billingPeriod === 'annual' ? 'year' : 'month'),
+                'months_charged' => (int) ($options[$billingPeriod]['months_charged'] ?? ($billingPeriod === 'annual' ? 12 : 1)),
+                'months_free' => (int) ($options[$billingPeriod]['months_free'] ?? 0),
+                'savings_label' => $options[$billingPeriod]['savings_label'] ?? null,
+            ];
+        }
+
+        return [
+            'key' => 'monthly',
+            'name' => 'Mensual',
+            'label' => $plan['label'] ?? 'Mensual',
+            'price' => (int) ($plan['price'] ?? 0),
+            'currency' => $plan['currency'] ?? 'MXN',
+            'interval' => $plan['interval'] ?? 'month',
+            'months_charged' => 1,
+            'months_free' => 0,
+            'savings_label' => null,
+        ];
+    }
+
+    protected function fallbackSubscriptionEndsAt(string $billingPeriod): Carbon
+    {
+        return $billingPeriod === 'annual' ? now()->addYear() : now()->addMonth();
+    }
+
+    protected function tenantDataWithSubscriptionCancellation(Tenant $tenant, array $subscription): array
+    {
+        $data = $tenant->data ?? [];
+
+        $data['subscription_cancellation'] = [
+            'cancel_at_period_end' => (bool) data_get($subscription, 'cancel_at_period_end', false),
+            'cancel_at' => $this->timestampToIso(data_get($subscription, 'cancel_at')),
+            'canceled_at' => $this->timestampToIso(data_get($subscription, 'canceled_at')),
+            'current_period_end' => $this->timestampToIso(data_get($subscription, 'current_period_end')),
+            'stripe_status' => data_get($subscription, 'status'),
+        ];
+
+        return $data;
+    }
+
+    protected function timestampToIso(mixed $timestamp): ?string
+    {
+        return $timestamp ? Carbon::createFromTimestamp((int) $timestamp)->toISOString() : null;
     }
 
     protected function handlePaymentIntentSucceeded(array $paymentIntent): void

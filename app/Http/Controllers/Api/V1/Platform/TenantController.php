@@ -8,6 +8,7 @@ use App\Services\Payments\StripePaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 use Throwable;
 
@@ -65,11 +66,13 @@ class TenantController extends Controller
     {
         $validated = $request->validate([
             'plan_key' => ['required', 'string', 'max:50'],
+            'billing_period' => ['sometimes', 'string', Rule::in(['monthly', 'annual'])],
         ]);
 
         $session = $stripePaymentService->createSubscriptionCheckoutSession(
             tenant(),
             $validated['plan_key'],
+            $validated['billing_period'] ?? 'monthly',
             $this->storefrontOrigin($request),
             $request->user()?->email
         );
@@ -96,6 +99,31 @@ class TenantController extends Controller
             'ok' => true,
             'message' => 'Suscripción actualizada correctamente.',
             'data' => $this->subscriptionPayload($tenant),
+        ]);
+    }
+
+    public function cancelSubscription(Request $request, StripePaymentService $stripePaymentService): JsonResponse
+    {
+        $validated = $request->validate([
+            'cancel_at_period_end' => ['sometimes', 'boolean'],
+        ]);
+
+        $result = $stripePaymentService->cancelSubscription(
+            tenant(),
+            $validated['cancel_at_period_end'] ?? true
+        );
+        $tenant = $result['tenant'];
+        unset($result['tenant']);
+
+        return response()->json([
+            'ok' => true,
+            'message' => $result['cancel_at_period_end']
+                ? 'La suscripción se cancelará al final del período actual.'
+                : 'La suscripción fue cancelada correctamente.',
+            'data' => [
+                'subscription' => $this->subscriptionPayload($tenant),
+                'cancellation' => $result,
+            ],
         ]);
     }
 
@@ -192,6 +220,8 @@ class TenantController extends Controller
             'price' => $plan['price'],
             'currency' => $plan['currency'],
             'interval' => $plan['interval'],
+            'default_billing_period' => 'monthly',
+            'billing_options' => $this->billingOptionsPayload($plan),
             'description' => $plan['description'],
             'features' => $plan['features'],
             'included_modules' => $plan['modules'],
@@ -210,6 +240,8 @@ class TenantController extends Controller
                 'price' => $tenant->plan['price'] ?? 0,
                 'currency' => $tenant->plan['currency'] ?? 'MXN',
                 'interval' => $tenant->plan['interval'] ?? null,
+                'default_billing_period' => 'monthly',
+                'billing_options' => $this->billingOptionsPayload($tenant->plan),
                 'features' => $tenant->plan['features'] ?? [],
                 'limits' => $tenant->plan['limits'] ?? [],
             ],
@@ -218,6 +250,7 @@ class TenantController extends Controller
             'started_at' => $tenant->subscription_started_at?->toISOString(),
             'ends_at' => $tenant->subscription_ends_at?->toISOString(),
             'suspended_at' => $tenant->suspended_at?->toISOString(),
+            'cancellation' => data_get($tenant->data, 'subscription_cancellation'),
         ];
     }
 
@@ -240,5 +273,23 @@ class TenantController extends Controller
         }
 
         return $scheme . '://' . $host . ($port ? ':' . $port : '');
+    }
+
+    protected function billingOptionsPayload(array $plan): array
+    {
+        return collect($plan['billing_options'] ?? [])
+            ->map(fn (array $option, string $key) => [
+                'key' => $key,
+                'label' => $option['label'] ?? null,
+                'price' => (int) ($option['price'] ?? 0),
+                'amount' => round(((int) ($option['price'] ?? 0)) / 100, 2),
+                'currency' => $option['currency'] ?? ($plan['currency'] ?? 'MXN'),
+                'interval' => $option['interval'] ?? 'month',
+                'months_charged' => (int) ($option['months_charged'] ?? ($key === 'annual' ? 12 : 1)),
+                'months_free' => (int) ($option['months_free'] ?? 0),
+                'savings_label' => $option['savings_label'] ?? null,
+            ])
+            ->values()
+            ->all();
     }
 }

@@ -149,6 +149,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/tenant/subscription/plans', [PlatformTenantController::class, 'tenantPlans']);
         Route::post('/tenant/subscription/checkout', [PlatformTenantController::class, 'createSubscriptionCheckout']);
         Route::post('/tenant/subscription/checkout/confirm', [PlatformTenantController::class, 'confirmSubscriptionCheckout']);
+        Route::post('/tenant/subscription/cancel', [PlatformTenantController::class, 'cancelSubscription']);
 
         Route::get('/tenant/stripe-connect/status', [TenantStripeConnectController::class, 'status']);
         Route::post('/tenant/stripe-connect/account', [TenantStripeConnectController::class, 'account']);
