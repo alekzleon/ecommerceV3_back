@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\V1\Platform\AdminTenantController as PlatformAdminT
 use App\Http\Controllers\Api\V1\Platform\TenantController as PlatformTenantController;
 use App\Http\Controllers\Api\V1\Platform\TenantStripeConnectController;
 use App\Http\Controllers\Api\V1\Account\AddressController;
+use App\Http\Controllers\Api\V1\Account\CashbackController;
 use App\Http\Controllers\Api\V1\Account\OrderController as AccountOrderController;
 use App\Http\Controllers\Api\V1\Account\FavoriteController;
 use App\Http\Controllers\Api\V1\Account\CustomerPfrProfileController;
@@ -321,6 +322,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/customer-pfr-profile', [CustomerPfrProfileController::class, 'show']);
             Route::post('/customer-pfr-profile', [CustomerPfrProfileController::class, 'store']);
 
+            Route::get('/cashback', [CashbackController::class, 'summary']);
+            Route::get('/cashback/summary', [CashbackController::class, 'summary']);
+            Route::get('/cashback/transactions', [CashbackController::class, 'transactions']);
             Route::get('/orders', [AccountOrderController::class, 'index']);
             Route::get('/orders/{order}', [AccountOrderController::class, 'show']);
             Route::get('/orders/{order}/purchase-order.pdf', [AccountOrderController::class, 'purchaseOrderPdf']);
