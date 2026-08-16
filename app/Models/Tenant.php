@@ -97,6 +97,11 @@ class Tenant extends BaseTenant implements TenantWithDatabase
         return $this->hasOne(TenantStripeAccount::class);
     }
 
+    public function customDomains(): HasMany
+    {
+        return $this->hasMany(CustomDomain::class);
+    }
+
     public function activatePlan(string $planKey, mixed $endsAt = null, ?string $provider = null, ?string $providerSubscriptionId = null): void
     {
         if (! array_key_exists($planKey, config('plans.plans', []))) {

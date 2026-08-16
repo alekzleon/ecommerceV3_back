@@ -52,6 +52,7 @@ use App\Http\Controllers\Api\V1\Admin\CreditController;
 use App\Http\Controllers\Api\V1\Admin\CollectionController;
 use App\Http\Controllers\Api\V1\Admin\ContactFaqController as AdminContactFaqController;
 use App\Http\Controllers\Api\V1\Admin\CouponController as AdminCouponController;
+use App\Http\Controllers\Api\V1\Admin\CustomDomainController;
 use App\Http\Controllers\Api\V1\Admin\MarketingController;
 use App\Http\Controllers\Api\V1\Admin\PromotionController;
 use App\Http\Controllers\Api\V1\Admin\LogController;
@@ -919,6 +920,21 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('settings', SettingController::class)
                     ->except(['index', 'store'])
                     ->middleware('module:configuracion_ecommerce');
+
+                Route::get('custom-domains', [CustomDomainController::class, 'index'])
+                    ->middleware(['module:configuracion_ecommerce', 'admin_or_super_admin']);
+
+                Route::post('custom-domains', [CustomDomainController::class, 'store'])
+                    ->middleware(['module:configuracion_ecommerce', 'admin_or_super_admin']);
+
+                Route::get('custom-domains/{customDomain}', [CustomDomainController::class, 'show'])
+                    ->middleware(['module:configuracion_ecommerce', 'admin_or_super_admin']);
+
+                Route::post('custom-domains/{customDomain}/refresh', [CustomDomainController::class, 'refresh'])
+                    ->middleware(['module:configuracion_ecommerce', 'admin_or_super_admin']);
+
+                Route::delete('custom-domains/{customDomain}', [CustomDomainController::class, 'destroy'])
+                    ->middleware(['module:configuracion_ecommerce', 'admin_or_super_admin']);
             });
     });
 });

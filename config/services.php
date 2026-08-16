@@ -71,4 +71,14 @@ return [
         ],
     ],
 
+    'cloudflare_for_saas' => [
+        'api_token' => env('CLOUDFLARE_API_TOKEN'),
+        'zone_id' => env('CLOUDFLARE_ZONE_ID'),
+        'platform_zone' => env('CLOUDFLARE_PLATFORM_ZONE', 'cloudishop.mx'),
+        'cname_target' => env('CLOUDFLARE_SAAS_CNAME_TARGET', 'domains.cloudishop.mx'),
+        'fallback_origin' => env('CLOUDFLARE_SAAS_FALLBACK_ORIGIN', 'origin.cloudishop.mx'),
+        'ssl_method' => env('CLOUDFLARE_SAAS_SSL_METHOD', 'http'),
+        'ssl_type' => env('CLOUDFLARE_SAAS_SSL_TYPE', 'dv'),
+    ],
+
 ];
