@@ -26,7 +26,7 @@ return [
         'https://www.demo.cloudishop.mx',
         'https://tuxcroquetitas.com',
         'https://cloudishop.mx',
-        'https://www.the1000box.com/',
+        'https://www.the1000box.com',
     ],
 
     'allowed_origins_patterns' => [
