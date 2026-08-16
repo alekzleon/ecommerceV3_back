@@ -2,6 +2,8 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\CustomDomain;
+use App\Models\Tenant;
 use Closure;
 use Illuminate\Http\Request;
 use Stancl\Tenancy\Database\Models\Domain;
@@ -24,19 +26,16 @@ class InitializeTenancyByTenantHost
             ], 400);
         }
 
-        $domain = Domain::query()
-            ->with('tenant')
-            ->where('domain', $host)
-            ->first();
+        $tenant = $this->tenantForHost($host);
 
-        if (! $domain || ! $domain->tenant) {
+        if (! $tenant) {
             return response()->json([
                 'message' => 'Tenant could not be identified.',
                 'tenant_host' => $host,
             ], 404);
         }
 
-        tenancy()->initialize($domain->tenant);
+        tenancy()->initialize($tenant);
 
         $request->attributes->set('tenant_host', $host);
 
@@ -60,5 +59,26 @@ class InitializeTenancyByTenantHost
         }
 
         return explode(':', $value)[0] ?: null;
+    }
+
+    private function tenantForHost(string $host): ?Tenant
+    {
+        $domain = Domain::query()
+            ->with('tenant')
+            ->where('domain', $host)
+            ->first();
+
+        if ($domain?->tenant) {
+            return $domain->tenant;
+        }
+
+        return CustomDomain::query()
+            ->with('tenant')
+            ->where('hostname', $host)
+            ->where('app_status', CustomDomain::STATUS_ACTIVE)
+            ->where('hostname_status', CustomDomain::STATUS_ACTIVE)
+            ->where('ssl_status', CustomDomain::STATUS_ACTIVE)
+            ->first()
+            ?->tenant;
     }
 }
