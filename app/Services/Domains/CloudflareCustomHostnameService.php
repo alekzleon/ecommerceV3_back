@@ -4,12 +4,18 @@ namespace App\Services\Domains;
 
 use App\Models\CustomDomain;
 use App\Models\Tenant;
+use App\Services\TenantNotificationService;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Stancl\Tenancy\Database\Models\Domain;
 
 class CloudflareCustomHostnameService
 {
+    public function __construct(
+        private TenantNotificationService $tenantNotifications
+    ) {
+    }
+
     public function configured(): bool
     {
         return filled($this->apiToken()) && filled($this->zoneId());
@@ -153,6 +159,7 @@ class CloudflareCustomHostnameService
 
     private function applyCloudflarePayload(CustomDomain $customDomain, ?array $payload): CustomDomain
     {
+        $wasReady = $customDomain->is_ready;
         $hostnameStatus = (string) data_get($payload, 'status', CustomDomain::STATUS_PENDING_VALIDATION);
         $sslStatus = data_get($payload, 'ssl.status');
         $ready = $hostnameStatus === CustomDomain::STATUS_ACTIVE && $sslStatus === CustomDomain::STATUS_ACTIVE;
@@ -173,6 +180,21 @@ class CloudflareCustomHostnameService
             Domain::query()->updateOrCreate(
                 ['domain' => $customDomain->hostname],
                 ['tenant_id' => $customDomain->tenant_id],
+            );
+        }
+
+        if (! $wasReady && $customDomain->is_ready && $customDomain->tenant) {
+            $this->tenantNotifications->sendToTenantOwner(
+                $customDomain->tenant,
+                'Tu dominio personalizado esta conectado',
+                'Dominio conectado',
+                "El dominio {$customDomain->hostname} ya esta listo para recibir visitas en tu tienda.",
+                "https://{$customDomain->hostname}",
+                'Ver tienda',
+                [
+                    'Dominio' => $customDomain->hostname,
+                    'Destino DNS' => $customDomain->cname_target ?: $this->cnameTarget(),
+                ],
             );
         }
 

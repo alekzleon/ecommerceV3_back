@@ -14,6 +14,7 @@ use App\Mail\PasswordResetLinkMail;
 use App\Models\CustomerProfile;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\TenantNotificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +24,11 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends BaseApiController
 {
+    public function __construct(
+        private TenantNotificationService $tenantNotifications
+    ) {
+    }
+
     public function register(RegisterRequest $request): JsonResponse
     {
         $validated = $request->validated();
@@ -66,6 +72,18 @@ class AuthController extends BaseApiController
         )->plainTextToken;
 
         $modules = $this->accessibleModules($user);
+
+        $this->tenantNotifications->sendToUser(
+            $user,
+            'Bienvenido a Cloudi Shop',
+            'Tu cuenta esta lista',
+            "Hola {$user->name}, tu registro se completo correctamente. Ya puedes iniciar sesion y comenzar a comprar.",
+            $this->frontendUrl($request),
+            'Ir a la tienda',
+            [
+                'Correo' => $user->email,
+            ],
+        );
 
         return response()->json([
             'ok' => true,
@@ -229,15 +247,18 @@ class AuthController extends BaseApiController
 
     public function resetPassword(ResetPasswordRequest $request): JsonResponse
     {
+        $resetUser = null;
+
         $status = Password::broker()->reset(
             $request->only('email', 'password', 'password_confirmation', 'token'),
-            function (User $user, string $password) {
+            function (User $user, string $password) use (&$resetUser) {
                 $user->forceFill([
                     'password' => Hash::make($password),
                     'must_change_password' => false,
                 ])->save();
 
                 $user->tokens()->delete();
+                $resetUser = $user;
             }
         );
 
@@ -245,6 +266,17 @@ class AuthController extends BaseApiController
             throw ValidationException::withMessages([
                 'token' => ['El token es inválido o expiró.'],
             ]);
+        }
+
+        if ($resetUser) {
+            $this->tenantNotifications->sendToUser(
+                $resetUser,
+                'Tu contraseña fue actualizada',
+                'Contraseña actualizada',
+                'Tu contraseña se actualizo correctamente. Si no reconoces este cambio, contacta al equipo de soporte de inmediato.',
+                $this->frontendUrl($request),
+                'Ir a la tienda',
+            );
         }
 
         return response()->json([
@@ -255,10 +287,21 @@ class AuthController extends BaseApiController
 
     public function changePassword(ChangePasswordRequest $request): JsonResponse
     {
-        $request->user()->update([
+        $user = $request->user();
+
+        $user->update([
             'password' => Hash::make($request->validated('password')),
             'must_change_password' => false,
         ]);
+
+        $this->tenantNotifications->sendToUser(
+            $user,
+            'Tu contraseña fue actualizada',
+            'Contraseña actualizada',
+            'Tu contraseña se actualizo correctamente. Si no reconoces este cambio, contacta al equipo de soporte de inmediato.',
+            $this->frontendUrl($request),
+            'Ir a la tienda',
+        );
 
         return response()->json([
             'ok' => true,
@@ -274,5 +317,10 @@ class AuthController extends BaseApiController
             ->pluck('name')
             ->values()
             ->toArray();
+    }
+
+    private function frontendUrl(Request $request): string
+    {
+        return rtrim((string) ($request->headers->get('origin') ?: config('services.frontend.url')), '/');
     }
 }

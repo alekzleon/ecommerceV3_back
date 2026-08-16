@@ -12,6 +12,7 @@ use App\Models\Tenant;
 use App\Models\TenantStripeAccount;
 use App\Models\EcommerceSetting;
 use App\Services\Orders\OrderNotificationService;
+use App\Services\TenantNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +23,8 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 class StripePaymentService
 {
     public function __construct(
-        protected OrderNotificationService $orderNotificationService
+        protected OrderNotificationService $orderNotificationService,
+        protected TenantNotificationService $tenantNotifications
     ) {
     }
 
@@ -476,6 +478,8 @@ class StripePaymentService
             'stripe',
             data_get($session, 'subscription')
         );
+
+        $this->notifySubscriptionPurchased($tenant->fresh(), $planKey, data_get($session, 'subscription'));
     }
 
     protected function syncStripeSubscriptionById(string $subscriptionId, string $secretKey): void
@@ -557,6 +561,8 @@ class StripePaymentService
         $tenant->forceFill([
             'provider_customer_id' => data_get($invoice, 'customer') ?: $tenant->provider_customer_id,
         ])->save();
+
+        $this->notifySubscriptionPurchased($tenant->fresh(), $planKey, $subscriptionId);
     }
 
     protected function handleInvoicePaymentFailed(array $invoice): void
@@ -1148,6 +1154,36 @@ class StripePaymentService
         }
 
         return (string) config('services.stripe.subscription_cancel_url');
+    }
+
+    protected function notifySubscriptionPurchased(Tenant $tenant, string $planKey, mixed $subscriptionId = null): void
+    {
+        $notificationKey = (string) ($subscriptionId ?: $planKey.'-'.$tenant->subscription_ends_at?->timestamp);
+
+        if (blank($notificationKey) || data_get($tenant->data, 'notifications.subscription_purchase_key') === $notificationKey) {
+            return;
+        }
+
+        $planName = (string) data_get(config("plans.plans.{$planKey}", []), 'name', $planKey);
+
+        $this->tenantNotifications->sendToTenantOwner(
+            $tenant,
+            'Tu suscripcion de Cloudi Shop esta activa',
+            'Suscripcion activa',
+            "Tu compra del plan {$planName} se proceso correctamente. Tu tienda ya cuenta con los beneficios del plan.",
+            null,
+            null,
+            [
+                'Plan' => $planName,
+                'Vigencia' => $tenant->subscription_ends_at?->format('d/m/Y') ?: 'Sin fecha de termino',
+            ],
+        );
+
+        $data = $tenant->data ?: [];
+        data_set($data, 'notifications.subscription_purchase_key', $notificationKey);
+        data_set($data, 'notifications.subscription_purchase_sent_at', now()->toISOString());
+
+        $tenant->forceFill(['data' => $data])->save();
     }
 
     protected function validateSignature(string $payload, ?string $signatureHeader): void

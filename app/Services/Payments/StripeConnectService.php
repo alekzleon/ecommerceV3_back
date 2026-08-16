@@ -5,12 +5,18 @@ namespace App\Services\Payments;
 use App\Models\Tenant;
 use App\Models\TenantStripeAccount;
 use App\Models\User;
+use App\Services\TenantNotificationService;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class StripeConnectService
 {
+    public function __construct(
+        private TenantNotificationService $tenantNotifications
+    ) {
+    }
+
     public function createOrRetrieveAccount(Tenant $tenant, ?User $user = null): TenantStripeAccount
     {
         $connectAccount = $tenant->stripeAccount ?: $tenant->stripeAccount()->create([
@@ -257,6 +263,7 @@ class StripeConnectService
 
     protected function fillFromStripeAccount(TenantStripeAccount $connectAccount, array $account, array $extra = []): TenantStripeAccount
     {
+        $wasReady = $connectAccount->isReadyForCharges();
         $currentlyDue = data_get($account, 'requirements.currently_due', []);
         $pastDue = data_get($account, 'requirements.past_due', []);
         $disabledReason = data_get($account, 'requirements.disabled_reason');
@@ -291,7 +298,24 @@ class StripeConnectService
             ...$extra,
         ])->save();
 
-        return $connectAccount->fresh();
+        $connectAccount = $connectAccount->fresh(['tenant']);
+
+        if (! $wasReady && $connectAccount->isReadyForCharges() && $connectAccount->tenant) {
+            $this->tenantNotifications->sendToTenantOwner(
+                $connectAccount->tenant,
+                'Stripe Connect esta listo',
+                'Pagos activados',
+                'Tu cuenta de Stripe Connect ya esta habilitada para cobrar y recibir pagos de tus clientes.',
+                null,
+                null,
+                [
+                    'Cuenta Stripe' => $connectAccount->stripe_account_id,
+                    'Estado' => 'Activa',
+                ],
+            );
+        }
+
+        return $connectAccount;
     }
 
     protected function secretKey(): string
