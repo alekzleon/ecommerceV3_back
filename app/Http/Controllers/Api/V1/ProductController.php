@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Enums\CartStatus;
 use App\Enums\PromotionType;
+use App\Models\EcommerceSetting;
 use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\User;
@@ -125,7 +126,7 @@ class ProductController extends Controller
 
         $products = $query->paginate($perPage)->appends($request->query());
 
-        $products->getCollection()->transform(fn (Product $product) => $this->formatProduct($product));
+        $products->getCollection()->transform(fn (Product $product) => $this->formatProduct($product, $user));
 
         return response()->json([
             'ok' => true,
@@ -176,7 +177,7 @@ class ProductController extends Controller
             ->sortBy(fn (Product $product) => $productIds->search($product->id))
             ->values();
 
-        $products = $products->map(fn (Product $product) => $this->formatProduct($product));
+        $products = $products->map(fn (Product $product) => $this->formatProduct($product, $user));
 
         return response()->json([
             'ok' => true,
@@ -220,9 +221,9 @@ class ProductController extends Controller
         $products = $productsQuery
             ->limit(500)
             ->get()
-            ->map(function (Product $product) use ($parsed, $terms) {
+            ->map(function (Product $product) use ($parsed, $terms, $user) {
                 $match = $this->scoreSmartSearchProduct($product, $terms, $parsed);
-                $payload = $this->formatProduct($product);
+                $payload = $this->formatProduct($product, $user);
                 $payload['relevance_score'] = $match['score'];
                 $payload['match_reasons'] = $match['reasons'];
 
@@ -300,11 +301,11 @@ class ProductController extends Controller
 
         return response()->json([
             'ok' => true,
-            'data' => $this->formatProduct($product),
+            'data' => $this->formatProduct($product, $user),
         ]);
     }
 
-    protected function currentUser(Request $request): ?User
+    public function currentUser(Request $request): ?User
     {
         return $request->user('sanctum') ?? $request->user();
     }
@@ -316,7 +317,7 @@ class ProductController extends Controller
         return $user ? (int) $user->id : null;
     }
 
-    protected function productListQuery(?int $userId = null)
+    public function productListQuery(?int $userId = null)
     {
         return Product::query()
             ->with([
@@ -598,9 +599,10 @@ class ProductController extends Controller
         return trim(preg_replace('/\s+/', ' ', (string) $text));
     }
 
-    protected function formatProduct(Product $product): array
+    public function formatProduct(Product $product, ?User $user = null): array
     {
         $price = (float) $product->default_price;
+        $pricingVisibility = EcommerceSetting::pricingVisibilityForUser($user);
 
         $activePromotions = $product->promotions
             ->map(fn (Promotion $promotion) => $this->formatProductPromotion($promotion, $price))
@@ -643,6 +645,7 @@ class ProductController extends Controller
             'image_url' => $product->image_url,
             'default_price' => $price,
             'base_default_price' => (float) $product->default_price,
+            'pricing_visibility' => $pricingVisibility,
             'stock' => $product->stock !== null ? (float) $product->stock : null,
             'stock_status' => $this->stockStatus($product),
             'stock_message' => $this->stockMessage($product),

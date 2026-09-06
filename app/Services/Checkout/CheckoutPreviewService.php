@@ -10,7 +10,7 @@ use Illuminate\Support\Collection;
 
 class CheckoutPreviewService
 {
-    public function build(Cart $cart, ?int $addressId = null, ?int $dirCliId = null): array
+    public function build(Cart $cart, ?int $addressId = null, ?int $dirCliId = null, ?array $guestShippingAddress = null): array
     {
         $cart->loadMissing([
             'user.defaultAddress',
@@ -21,7 +21,7 @@ class CheckoutPreviewService
 
         $items = $cart->items->values();
         $shippingCharge = $this->shippingCharge($cart);
-        $shipping = $this->buildShipping($cart, $shippingCharge, $addressId, $dirCliId);
+        $shipping = $this->buildShipping($cart, $shippingCharge, $addressId, $dirCliId, $guestShippingAddress);
         $blockers = $this->blockers($cart, $items, $shipping['selected_address']);
         $checkoutItems = $items->map(fn (CartItem $item, int $index) => $this->buildItem($item, $index + 1))->values();
         $totals = $this->buildTotals($cart, $checkoutItems, $shippingCharge);
@@ -43,6 +43,7 @@ class CheckoutPreviewService
             'items' => $checkoutItems,
             'promotions_applied' => $this->buildPromotionsApplied($items),
             'coupon' => data_get($cart->metadata, 'coupon'),
+            'coupons' => data_get($cart->metadata, 'coupons', data_get($cart->metadata, 'coupon') ? [data_get($cart->metadata, 'coupon')] : []),
             'loyalty' => data_get($cart->metadata, 'loyalty', [
                 'first_purchase_discount' => null,
                 'cashback' => null,
@@ -110,8 +111,36 @@ class CheckoutPreviewService
         return $blockers;
     }
 
-    protected function buildShipping(Cart $cart, array $shippingCharge, ?int $addressId = null, ?int $dirCliId = null): array
+    protected function buildShipping(Cart $cart, array $shippingCharge, ?int $addressId = null, ?int $dirCliId = null, ?array $guestShippingAddress = null): array
     {
+        if (! $cart->user) {
+            $address = $guestShippingAddress ?: data_get($cart->metadata, 'guest.shipping_address');
+
+            return [
+                'requires_address' => true,
+                'has_selected_address' => filled($address),
+                'selected_address' => $address ?: null,
+                'addresses' => filled($address) ? [$address] : [],
+                'can_choose_address' => false,
+                'method' => [
+                    'key' => 'standard',
+                    'label' => $shippingCharge['label'],
+                ],
+                'enabled' => $shippingCharge['enabled'],
+                'amount' => $shippingCharge['amount'],
+                'base_amount' => $shippingCharge['base_amount'],
+                'is_free' => $shippingCharge['is_free'],
+                'free_shipping_minimum_enabled' => $shippingCharge['free_shipping_minimum_enabled'],
+                'free_shipping_minimum' => $shippingCharge['free_shipping_minimum'],
+                'qualifying_amount' => $shippingCharge['qualifying_amount'],
+                'remaining_for_free_shipping' => $shippingCharge['remaining_for_free_shipping'],
+                'free_shipping_basis' => 'subtotal_after_item_discounts',
+                'message' => $address
+                    ? 'Dirección de envío invitada capturada.'
+                    : 'Agrega una dirección de envío para continuar.',
+            ];
+        }
+
         $addresses = $cart->user?->addresses
             ? $cart->user->addresses->sortByDesc('is_default')->sortByDesc('id')->values()
             : collect();
@@ -366,6 +395,7 @@ class CheckoutPreviewService
                 'cashback' => null,
             ]),
             'coupon' => data_get($cart->metadata, 'coupon'),
+            'coupons' => data_get($cart->metadata, 'coupons', data_get($cart->metadata, 'coupon') ? [data_get($cart->metadata, 'coupon')] : []),
             'total' => $total,
             'amount_due' => $total,
         ];

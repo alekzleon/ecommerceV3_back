@@ -20,6 +20,7 @@ class Order extends Model
 
     protected $fillable = [
         'user_id',
+        'guest_token',
         'cart_id',
         'number',
         'orden_compra',

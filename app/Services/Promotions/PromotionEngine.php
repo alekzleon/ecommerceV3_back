@@ -13,7 +13,7 @@ class PromotionEngine
 {
     protected const GIFT_ACCOUNTING_UNIT_PRICE = 0.10;
 
-    public function applyToCart(Cart $cart, User $user): void
+    public function applyToCart(Cart $cart, ?User $user): void
     {
         $cart->loadMissing([
             'items.product.category',

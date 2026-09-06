@@ -61,6 +61,7 @@ class HomeController extends Controller
                 'title' => data_get($storefront, 'construction_title'),
                 'message' => data_get($storefront, 'construction_message'),
             ],
+            'access_rules' => EcommerceSetting::pricingVisibilityForUser(auth('sanctum')->user() ?? auth()->user()),
             'active_template' => data_get($template, 'active_template', EcommerceSetting::HOME_TEMPLATE_CLASSIC),
             'available_templates' => EcommerceSetting::availableTemplates(),
         ];
@@ -168,6 +169,8 @@ class HomeController extends Controller
 
     protected function featuredProducts(int $limit = 12): array
     {
+        $pricingVisibility = EcommerceSetting::pricingVisibilityForUser(auth('sanctum')->user() ?? auth()->user());
+
         return Product::query()
             ->with([
                 'category:id,grupo_linea_id,name,slug',
@@ -201,6 +204,7 @@ class HomeController extends Controller
                 'image_path' => $product->image_path,
                 'image_url' => $product->image_url,
                 'default_price' => (float) $product->default_price,
+                'pricing_visibility' => $pricingVisibility,
                 'stock' => $product->stock !== null ? (float) $product->stock : null,
             ])
             ->values()

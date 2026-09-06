@@ -185,6 +185,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/ecommerce-settings/sale-notifications', [EcommerceSettingController::class, 'saleNotifications']);
         Route::get('/ecommerce-settings/payment-methods', [EcommerceSettingController::class, 'paymentMethods']);
         Route::get('/ecommerce-settings/shipping', [EcommerceSettingController::class, 'shipping']);
+        Route::get('/ecommerce-settings/access-rules', [EcommerceSettingController::class, 'accessRules']);
         Route::get('/ecommerce-settings/home-benefits', [EcommerceSettingController::class, 'homeBenefits']);
         Route::get('/ecommerce-settings/home-benefits/{benefit}', [EcommerceSettingController::class, 'homeBenefit']);
         Route::get('/contact-faqs', [ContactFaqController::class, 'index']);
@@ -193,7 +194,22 @@ Route::prefix('v1')->group(function () {
         Route::get('/promotions/random', [CustomerPromotionController::class, 'random']);
         Route::get('/promotions/random-six', [CustomerPromotionController::class, 'randomSix']);
         Route::get('/promotions/all', [CustomerPromotionController::class, 'all']);
+        Route::get('/promotions/{slug}/products', [CustomerPromotionController::class, 'products']);
         Route::get('/promotions', [CustomerPromotionController::class, 'index']);
+
+        Route::get('/guest/cart', [CartController::class, 'guestIndex']);
+        Route::delete('/guest/cart', [CartController::class, 'guestClear']);
+        Route::post('/guest/cart/items', [CartController::class, 'guestStoreItem']);
+        Route::patch('/guest/cart/items/{item}', [CartController::class, 'guestUpdateItem']);
+        Route::delete('/guest/cart/items/{item}', [CartController::class, 'guestDestroyItem']);
+        Route::post('/guest/cart/coupon', [CartController::class, 'guestApplyCoupon']);
+        Route::delete('/guest/cart/coupon', [CartController::class, 'guestClearCoupon']);
+        Route::get('/guest/checkout/preview', [CheckoutController::class, 'guestPreview']);
+        Route::post('/guest/checkout/validate', [CheckoutController::class, 'guestValidateCart']);
+        Route::post('/guest/checkout/orders', [CheckoutController::class, 'guestCreateOrder']);
+        Route::get('/guest/checkout/orders/{order}', [CheckoutController::class, 'guestShowOrder']);
+        Route::post('/guest/checkout/stripe/session', [CheckoutController::class, 'guestCreateStripeSession']);
+        Route::post('/guest/checkout/stripe/session/confirm', [CheckoutController::class, 'guestConfirmStripeSession']);
     });
 
     /*
@@ -636,16 +652,19 @@ Route::prefix('v1')->group(function () {
                     ->middleware('module:marketing');
 
                 Route::get('coupons/form-options', [AdminCouponController::class, 'formOptions'])
-                    ->middleware('module:promociones');
+                    ->middleware('module:cupones');
 
                 Route::patch('coupons/{coupon}/toggle', [AdminCouponController::class, 'toggle'])
-                    ->middleware('module:promociones');
+                    ->middleware('module:cupones');
 
                 Route::post('coupons/{coupon}/send', [AdminCouponController::class, 'send'])
-                    ->middleware('module:promociones');
+                    ->middleware('module:cupones');
+
+                Route::post('coupons/{coupon}/assign-users', [AdminCouponController::class, 'assignUsers'])
+                    ->middleware('module:cupones');
 
                 Route::apiResource('coupons', AdminCouponController::class)
-                    ->middleware('module:promociones');
+                    ->middleware('module:cupones');
 
                 Route::patch('banners/{banner}/toggle', [AdminBannerController::class, 'toggle'])
                     ->middleware('module:banners');

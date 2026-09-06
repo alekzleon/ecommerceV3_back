@@ -11,6 +11,7 @@ use App\Http\Resources\Cart\CartResource;
 use App\Http\Resources\Cart\CartSummaryResource;
 use App\Models\Cart;
 use App\Models\CartItem;
+use App\Models\EcommerceSetting;
 use App\Models\Promotion;
 use App\Models\Product;
 use App\Services\CartService;
@@ -59,6 +60,25 @@ class CartController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Carrito obtenido correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
+    public function guestIndex(Request $request): JsonResponse
+    {
+        $this->ensureGuestCheckoutIsEnabled();
+
+        $cart = $this->cartService->getOrCreateGuestCart($this->guestTokenFromRequest($request));
+        $cart = $this->salesChannelService->applyToCart(
+            $cart,
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
+        );
+        $cart = $this->cartService->recalculateCart($cart);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Carrito invitado obtenido correctamente.',
             'data' => new CartResource($cart),
         ]);
     }
@@ -129,6 +149,39 @@ class CartController extends Controller
         ], 201);
     }
 
+    public function guestStoreItem(AddCartItemRequest $request): JsonResponse
+    {
+        $this->ensureGuestCheckoutIsEnabled();
+
+        $product = Product::query()
+            ->with(['category', 'family'])
+            ->findOrFail($request->integer('product_id'));
+
+        $validationError = $this->validateProductCanBeAdded($product, null);
+
+        if ($validationError) {
+            return $validationError;
+        }
+
+        $cart = $this->cartService->addGuestItem(
+            guestToken: $this->guestTokenFromRequest($request),
+            product: $product,
+            quantity: (float) $request->input('quantity'),
+            attributeValueIds: $request->input('attribute_value_ids', [])
+        );
+        $cart = $this->salesChannelService->applyToCart(
+            $cart,
+            $this->salesChannelService->fromRequest($request),
+            $this->salesChannelService->trackingFromRequest($request)
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Producto agregado al carrito invitado correctamente.',
+            'data' => new CartResource($cart),
+        ], 201);
+    }
+
     public function updateSalesChannel(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -173,10 +226,43 @@ class CartController extends Controller
         ]);
     }
 
+    public function guestUpdateItem(UpdateCartItemRequest $request, CartItem $item): JsonResponse
+    {
+        $this->ensureGuestCheckoutIsEnabled();
+
+        $cart = $this->cartService->updateGuestItemQuantity(
+            guestToken: $this->guestTokenFromRequest($request, required: true),
+            item: $item,
+            quantity: (float) $request->input('quantity')
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cantidad actualizada correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
     public function destroyItem(Request $request, CartItem $item): JsonResponse
     {
         $cart = $this->cartService->removeItem(
             user: $request->user(),
+            item: $item
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Producto eliminado del carrito correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
+    public function guestDestroyItem(Request $request, CartItem $item): JsonResponse
+    {
+        $this->ensureGuestCheckoutIsEnabled();
+
+        $cart = $this->cartService->removeGuestItem(
+            guestToken: $this->guestTokenFromRequest($request, required: true),
             item: $item
         );
 
@@ -194,6 +280,19 @@ class CartController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Carrito vaciado correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
+    public function guestClear(Request $request): JsonResponse
+    {
+        $this->ensureGuestCheckoutIsEnabled();
+
+        $cart = $this->cartService->clearGuestCart($this->guestTokenFromRequest($request, required: true));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Carrito invitado vaciado correctamente.',
             'data' => new CartResource($cart),
         ]);
     }
@@ -249,9 +348,42 @@ class CartController extends Controller
         ]);
     }
 
+    public function guestApplyCoupon(Request $request): JsonResponse
+    {
+        $this->ensureGuestCheckoutIsEnabled();
+
+        $validated = $request->validate([
+            'code' => ['required', 'string', 'max:80'],
+        ]);
+
+        $cart = $this->cartService->applyGuestCoupon(
+            $this->guestTokenFromRequest($request, required: true),
+            $validated['code']
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cupón aplicado correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
     public function clearCoupon(Request $request): JsonResponse
     {
         $cart = $this->cartService->clearCoupon($request->user());
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cupón eliminado correctamente.',
+            'data' => new CartResource($cart),
+        ]);
+    }
+
+    public function guestClearCoupon(Request $request): JsonResponse
+    {
+        $this->ensureGuestCheckoutIsEnabled();
+
+        $cart = $this->cartService->clearGuestCoupon($this->guestTokenFromRequest($request, required: true));
 
         return response()->json([
             'success' => true,
@@ -459,6 +591,28 @@ class CartController extends Controller
             'success' => false,
             'message' => $message,
         ], $status);
+    }
+
+    protected function ensureGuestCheckoutIsEnabled(): void
+    {
+        abort_if(
+            (bool) data_get(EcommerceSetting::accessRulesSettings(), 'requires_login_to_purchase', true),
+            403,
+            'La tienda requiere iniciar sesión para comprar.'
+        );
+    }
+
+    protected function guestTokenFromRequest(Request $request, bool $required = false): ?string
+    {
+        $token = $request->header('X-Guest-Token')
+            ?: $request->input('guest_token')
+            ?: $request->query('guest_token');
+
+        $token = $this->cartService->normalizeGuestToken($token);
+
+        abort_if($required && ! $token, 422, 'El token de carrito invitado es obligatorio.');
+
+        return $token;
     }
 
     protected function loadUsablePromotion(Request $request, Promotion $promotion): Promotion

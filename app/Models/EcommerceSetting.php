@@ -17,6 +17,7 @@ class EcommerceSetting extends Model
     public const KEY_SALE_NOTIFICATIONS = 'sale_notifications';
     public const KEY_PAYMENT_METHODS = 'payment_methods';
     public const KEY_SHIPPING = 'shipping';
+    public const KEY_ACCESS_RULES = 'access_rules';
     public const KEY_HOME_BENEFIT_PREFIX = 'home_benefit_';
     public const KEY_STOREFRONT = 'storefront';
     public const KEY_HOME_TEMPLATE = 'home_template';
@@ -135,6 +136,41 @@ class EcommerceSetting extends Model
         }
 
         return $settings;
+    }
+
+    public static function accessRulesSettings(): array
+    {
+        $settings = array_merge([
+            'requires_login_to_purchase' => true,
+            'hide_prices_for_guests' => true,
+        ], static::getValue(static::KEY_ACCESS_RULES, []));
+
+        $settings['requires_login_to_purchase'] = (bool) data_get($settings, 'requires_login_to_purchase', true);
+        $settings['hide_prices_for_guests'] = (bool) data_get($settings, 'hide_prices_for_guests', true);
+
+        if (! $settings['requires_login_to_purchase']) {
+            $settings['hide_prices_for_guests'] = false;
+        }
+
+        return $settings;
+    }
+
+    public static function pricingVisibilityForUser(?User $user): array
+    {
+        $settings = static::accessRulesSettings();
+        $isAuthenticated = (bool) $user;
+        $canPurchase = ! $settings['requires_login_to_purchase'] || $isAuthenticated;
+        $canViewPrice = ! $settings['hide_prices_for_guests'] || $isAuthenticated;
+
+        return [
+            'requires_login_to_purchase' => $settings['requires_login_to_purchase'],
+            'hide_prices_for_guests' => $settings['hide_prices_for_guests'],
+            'is_authenticated' => $isAuthenticated,
+            'can_view_price' => $canViewPrice,
+            'can_purchase' => $canPurchase,
+            'price_visibility_reason' => $canViewPrice ? null : 'login_required',
+            'purchase_block_reason' => $canPurchase ? null : 'login_required',
+        ];
     }
 
     public static function homeBenefitKey(int $benefit): string

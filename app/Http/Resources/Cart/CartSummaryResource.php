@@ -29,6 +29,7 @@ class CartSummaryResource extends JsonResource
                 'items' => [],
             ]),
             'coupon' => data_get($this->metadata, 'coupon'),
+            'coupons' => data_get($this->metadata, 'coupons', data_get($this->metadata, 'coupon') ? [data_get($this->metadata, 'coupon')] : []),
             'loyalty' => data_get($this->metadata, 'loyalty', [
                 'first_purchase_discount' => null,
                 'cashback' => null,

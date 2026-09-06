@@ -67,6 +67,8 @@ class CartResource extends JsonResource
 
         return [
             'id' => $this->id,
+            'guest_token' => $this->guest_token,
+            'checkout_mode' => $this->guest_token ? 'guest' : 'authenticated',
             'status' => $this->status,
             'sales_channel' => $this->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL,
             'sales_channel_label' => app(SalesChannelService::class)->label($this->sales_channel),
@@ -81,6 +83,7 @@ class CartResource extends JsonResource
                 'items' => [],
             ]),
             'coupon' => data_get($this->metadata, 'coupon'),
+            'coupons' => data_get($this->metadata, 'coupons', data_get($this->metadata, 'coupon') ? [data_get($this->metadata, 'coupon')] : []),
             'loyalty' => data_get($this->metadata, 'loyalty', [
                 'first_purchase_discount' => null,
                 'cashback' => null,
@@ -95,6 +98,18 @@ class CartResource extends JsonResource
 
     protected function shippingPayload(): array
     {
+        if (! $this->user) {
+            $guestAddress = data_get($this->metadata, 'guest.shipping_address');
+
+            return [
+                'requires_address' => true,
+                'has_selected_address' => filled($guestAddress),
+                'selected_address' => $guestAddress,
+                'addresses' => filled($guestAddress) ? [$guestAddress] : [],
+                'can_choose_address' => false,
+            ];
+        }
+
         $addresses = $this->user?->addresses
             ? $this->user->addresses->sortByDesc('is_default')->sortByDesc('id')->values()
             : collect();

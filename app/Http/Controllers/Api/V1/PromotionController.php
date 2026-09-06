@@ -12,7 +12,8 @@ use Illuminate\Http\Request;
 class PromotionController extends Controller
 {
     public function __construct(
-        protected CartService $cartService
+        protected CartService $cartService,
+        protected ProductController $productController
     ) {
     }
 
@@ -98,6 +99,52 @@ class PromotionController extends Controller
                 'total' => $promotions->total(),
                 'from' => $promotions->firstItem(),
                 'to' => $promotions->lastItem(),
+            ],
+        ]);
+    }
+
+    public function products(Request $request, string $slug): JsonResponse
+    {
+        $perPage = max(1, min((int) $request->integer('per_page', 16), 60));
+        $user = $this->productController->currentUser($request);
+        $userId = $user ? (int) $user->id : null;
+
+        $promotion = Promotion::query()
+            ->usable($user)
+            ->where('slug', $slug)
+            ->first();
+
+        if (!$promotion) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Promoción no encontrada.',
+            ], 404);
+        }
+
+        $products = $this->productController
+            ->productListQuery($userId)
+            ->where('is_active', true)
+            ->whereHas('promotions', fn ($query) => $query->where('promotions.id', $promotion->id))
+            ->orderBy('name', 'asc')
+            ->orderBy('id', 'asc')
+            ->paginate($perPage)
+            ->appends($request->query());
+
+        $products->getCollection()->transform(
+            fn ($product) => $this->productController->formatProduct($product, $user)
+        );
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Productos de la promoción obtenidos correctamente.',
+            'data' => $products->items(),
+            'meta' => [
+                'current_page' => $products->currentPage(),
+                'last_page' => $products->lastPage(),
+                'per_page' => $products->perPage(),
+                'total' => $products->total(),
+                'from' => $products->firstItem(),
+                'to' => $products->lastItem(),
             ],
         ]);
     }

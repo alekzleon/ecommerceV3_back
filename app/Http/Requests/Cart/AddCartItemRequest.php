@@ -17,7 +17,7 @@ class AddCartItemRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return auth()->check();
+        return auth()->check() || str_contains($this->path(), 'guest/cart');
     }
 
     /**

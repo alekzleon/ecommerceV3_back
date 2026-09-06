@@ -139,6 +139,7 @@ return [
                 'canales_venta',
                 'marketing',
                 'promociones',
+                'cupones',
                 'banners',
                 'logs',
                 'configuracion_ecommerce',

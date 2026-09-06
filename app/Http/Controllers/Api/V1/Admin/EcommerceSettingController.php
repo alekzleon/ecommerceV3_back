@@ -36,13 +36,26 @@ class EcommerceSettingController extends Controller
 
         if (array_key_exists('is_published', $validated) ||
             array_key_exists('construction_title', $validated) ||
-            array_key_exists('construction_message', $validated)) {
+            array_key_exists('construction_message', $validated) ||
+            array_key_exists('requires_login_to_purchase', $validated) ||
+            array_key_exists('hide_prices_for_guests', $validated)) {
             $storefront = EcommerceSetting::storefrontSettings();
+            $accessRules = EcommerceSetting::accessRulesSettings();
 
             foreach (['is_published', 'construction_title', 'construction_message'] as $field) {
                 if (array_key_exists($field, $validated)) {
                     $storefront[$field] = $validated[$field];
                 }
+            }
+
+            foreach (['requires_login_to_purchase', 'hide_prices_for_guests'] as $field) {
+                if (array_key_exists($field, $validated)) {
+                    $accessRules[$field] = (bool) $validated[$field];
+                }
+            }
+
+            if (! $accessRules['requires_login_to_purchase']) {
+                $accessRules['hide_prices_for_guests'] = false;
             }
 
             if ((bool) data_get($storefront, 'is_published', false)) {
@@ -54,6 +67,7 @@ class EcommerceSettingController extends Controller
             }
 
             EcommerceSetting::setValue(EcommerceSetting::KEY_STOREFRONT, $storefront);
+            EcommerceSetting::setValue(EcommerceSetting::KEY_ACCESS_RULES, $accessRules);
         }
 
         $activeTemplate = $validated['active_template'] ?? $validated['template'] ?? null;
@@ -564,6 +578,7 @@ class EcommerceSettingController extends Controller
                 'title' => data_get($storefront, 'construction_title'),
                 'message' => data_get($storefront, 'construction_message'),
             ],
+            'access_rules' => EcommerceSetting::pricingVisibilityForUser(auth('sanctum')->user() ?? auth()->user()),
             'active_template' => data_get($template, 'active_template', EcommerceSetting::HOME_TEMPLATE_CLASSIC),
             'available_templates' => EcommerceSetting::availableTemplates(),
         ];

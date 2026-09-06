@@ -10,6 +10,17 @@ use Illuminate\Http\JsonResponse;
 
 class EcommerceSettingController extends Controller
 {
+    public function accessRules(): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'key' => EcommerceSetting::KEY_ACCESS_RULES,
+                'value' => EcommerceSetting::pricingVisibilityForUser(auth('sanctum')->user() ?? auth()->user()),
+            ],
+        ]);
+    }
+
     public function homeBenefits(): JsonResponse
     {
         return response()->json([

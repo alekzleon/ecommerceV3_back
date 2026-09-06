@@ -29,6 +29,7 @@ class RoleModuleSeeder extends Seeder
                 'cobranza',
                 'marketing',
                 'promociones',
+                'cupones',
                 'banners',
                 'logs',
                 'sincronizacion',
@@ -53,6 +54,7 @@ class RoleModuleSeeder extends Seeder
                 'cobranza',
                 'marketing',
                 'promociones',
+                'cupones',
                 'banners',
                 'logs',
                 'sincronizacion',
@@ -76,6 +78,7 @@ class RoleModuleSeeder extends Seeder
                 'cobranza',
                 'marketing',
                 'promociones',
+                'cupones',
                 'banners',
                 'logs',
                 'sincronizacion',
@@ -85,6 +88,7 @@ class RoleModuleSeeder extends Seeder
             'marketing' => [
                 'marketing',
                 'promociones',
+                'cupones',
                 'banners',
             ],
             'credito_cobranza' => [

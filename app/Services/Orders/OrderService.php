@@ -10,10 +10,12 @@ use App\Models\Coupon;
 use App\Models\CouponRedemption;
 use App\Models\Order;
 use App\Models\User;
+use App\Mail\CouponMarketingMail;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPreviewService;
 use App\Services\SalesChannelService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 class OrderService
@@ -190,8 +192,186 @@ class OrderService
         });
     }
 
+    public function createGuestPendingFromCart(
+        string $guestToken,
+        array $guest,
+        ?string $documentNotes = null,
+        ?string $salesChannel = null,
+        array $salesChannelTracking = []
+    ): Order {
+        return DB::transaction(function () use ($guestToken, $guest, $documentNotes, $salesChannel, $salesChannelTracking) {
+            $cart = $this->cartService->getOrCreateGuestCart($guestToken);
+            $metadata = $cart->metadata ?? [];
+            $metadata['guest'] = $guest;
+            $cart->forceFill(['metadata' => $metadata])->save();
+
+            $cart = $this->salesChannelService->applyToCart($cart, $salesChannel, $salesChannelTracking);
+            $cart = $this->cartService->recalculateCart($cart);
+            $preview = $this->checkoutPreviewService->build(
+                $cart,
+                null,
+                null,
+                data_get($guest, 'shipping_address')
+            );
+            $documentNotes = $this->normalizeDocumentNotes($documentNotes);
+            $salesChannel = $cart->sales_channel ?: SalesChannelService::DEFAULT_CHANNEL;
+
+            abort_unless($preview['can_checkout'], 422, 'El carrito tiene detalles por resolver antes del checkout.');
+            abort_unless((float) data_get($preview, 'totals.total', 0) > 0, 422, 'El total del pedido debe ser mayor a cero.');
+
+            $existingOrder = Order::query()
+                ->where('cart_id', $cart->id)
+                ->where('guest_token', $guestToken)
+                ->where('payment_status', Order::PAYMENT_PENDING)
+                ->latest('id')
+                ->first();
+
+            $ordenCompra = $this->randomOrdenCompra();
+
+            if ($existingOrder) {
+                $folioMicrosip = $existingOrder->folio_microsip ?: $this->webFolio($existingOrder->id);
+
+                $existingOrder->forceFill([
+                    'orden_compra' => $ordenCompra,
+                    'folio_microsip' => $folioMicrosip,
+                    'sales_channel' => $salesChannel,
+                    'items_count' => (int) round((float) data_get($preview, 'totals.items_count', 0)),
+                    'subtotal' => data_get($preview, 'totals.subtotal', 0),
+                    'discount' => data_get($preview, 'totals.discount', 0),
+                    'tax' => data_get($preview, 'totals.tax', 0),
+                    'shipping' => data_get($preview, 'totals.shipping', 0),
+                    'total' => data_get($preview, 'totals.total', 0),
+                    'shipping_address_snapshot' => data_get($preview, 'shipping.selected_address'),
+                    'document_notes' => $documentNotes,
+                    'metadata' => array_merge($existingOrder->metadata ?? [], [
+                        'checkout_mode' => 'guest',
+                        'guest' => $guest,
+                        'orden_compra' => $ordenCompra,
+                        'folio_microsip' => $folioMicrosip,
+                        'sales_channel' => $salesChannel,
+                        'sales_channel_tracking' => data_get($cart->metadata, 'sales_channel_tracking', []),
+                        'document_notes' => $documentNotes,
+                        'shipping_details' => data_get($preview, 'totals.shipping_details', []),
+                        'tax_breakdown' => data_get($preview, 'totals.tax_breakdown', []),
+                    ]),
+                ])->save();
+
+                return $existingOrder->load('items');
+            }
+
+            $order = Order::create([
+                'user_id' => null,
+                'guest_token' => $guestToken,
+                'cart_id' => $cart->id,
+                'number' => $this->nextOrderNumber(),
+                'orden_compra' => $ordenCompra,
+                'sales_channel' => $salesChannel,
+                'status' => Order::STATUS_PENDING_PAYMENT,
+                'currency' => strtoupper((string) data_get($preview, 'currency', 'MXN')),
+                'items_count' => (int) round((float) data_get($preview, 'totals.items_count', 0)),
+                'subtotal' => data_get($preview, 'totals.subtotal', 0),
+                'discount' => data_get($preview, 'totals.discount', 0),
+                'tax' => data_get($preview, 'totals.tax', 0),
+                'shipping' => data_get($preview, 'totals.shipping', 0),
+                'total' => data_get($preview, 'totals.total', 0),
+                'payment_status' => Order::PAYMENT_PENDING,
+                'shipping_address_snapshot' => data_get($preview, 'shipping.selected_address'),
+                'document_notes' => $documentNotes,
+                'metadata' => [
+                    'checkout_mode' => 'guest',
+                    'guest' => $guest,
+                    'cart_id' => $cart->id,
+                    'orden_compra' => $ordenCompra,
+                    'sales_channel' => $salesChannel,
+                    'sales_channel_tracking' => data_get($cart->metadata, 'sales_channel_tracking', []),
+                    'document_notes' => $documentNotes,
+                    'promotions_applied' => data_get($preview, 'promotions_applied', []),
+                    'coupon' => data_get($preview, 'coupon'),
+                    'loyalty' => data_get($preview, 'loyalty', []),
+                    'tax_breakdown' => data_get($preview, 'totals.tax_breakdown', []),
+                    'shipping_details' => data_get($preview, 'totals.shipping_details', []),
+                ],
+            ]);
+
+            $folioMicrosip = $this->webFolio($order->id);
+            $order->forceFill([
+                'folio_microsip' => $folioMicrosip,
+                'metadata' => array_merge($order->metadata ?? [], [
+                    'folio_microsip' => $folioMicrosip,
+                ]),
+            ])->save();
+
+            foreach (data_get($preview, 'items', []) as $item) {
+                $microsipOrderKey = $this->microsipOrderKeySnapshot(data_get($item, 'product_id'));
+
+                $order->items()->create([
+                    'product_id' => data_get($item, 'product_id'),
+                    'sku_snapshot' => data_get($item, 'sku'),
+                    'clave_articulo_id_snapshot' => $microsipOrderKey['clave_articulo_id'],
+                    'clave_articulo_snapshot' => $microsipOrderKey['clave_articulo'],
+                    'rol_clave_art_id_snapshot' => $microsipOrderKey['rol_clave_art_id'],
+                    'contenido_empaque_snapshot' => $microsipOrderKey['contenido_empaque'],
+                    'name_snapshot' => data_get($item, 'name'),
+                    'brand_snapshot' => data_get($item, 'brand'),
+                    'image_snapshot' => data_get($item, 'image'),
+                    'quantity' => data_get($item, 'quantity', 0),
+                    'unit_price' => data_get($item, 'unit_price', 0),
+                    'discount' => data_get($item, 'discount', 0),
+                    'line_total' => data_get($item, 'total', 0),
+                    'promotion_id' => data_get($item, 'promotion.id'),
+                    'promotion_name_snapshot' => data_get($item, 'promotion.name'),
+                    'promotion_snapshot' => data_get($item, 'promotion.snapshot'),
+                    'metadata' => [
+                        'regular_units' => data_get($item, 'regular_units'),
+                        'regular_line_total' => data_get($item, 'regular_line_total'),
+                        'price_info' => data_get($item, 'price_info'),
+                        'selected_attribute_value_ids' => data_get($item, 'selected_attribute_value_ids', []),
+                        'selected_attributes' => data_get($item, 'selected_attributes', []),
+                        'gift_units' => data_get($item, 'gift_units'),
+                        'gift_item_units' => data_get($item, 'gift_item_units'),
+                        'gift_items' => data_get($item, 'gift_items', []),
+                        'gift_unit_accounting_price' => data_get($item, 'gift_unit_accounting_price'),
+                        'gift_line_total' => data_get($item, 'gift_line_total'),
+                        'base_subtotal' => data_get($item, 'base_subtotal'),
+                        'taxable_base' => data_get($item, 'taxable_base'),
+                        'tax' => data_get($item, 'tax'),
+                        'taxes' => data_get($item, 'taxes', []),
+                        'accounting' => data_get($item, 'accounting'),
+                        'breakdown' => data_get($item, 'breakdown'),
+                        'microsip_order_key' => $microsipOrderKey,
+                    ],
+                ]);
+            }
+
+            $this->recordCouponRedemption($order, $preview);
+
+            $cart->forceFill([
+                'status' => CartStatus::CONVERTED->value,
+                'converted_at' => now(),
+                'order_id' => $order->id,
+            ])->save();
+
+            $this->cartService->registerEvent(
+                cart: $cart,
+                user: null,
+                eventType: 'guest_order_created',
+                eventData: [
+                    'order_id' => $order->id,
+                    'order_number' => $order->number,
+                    'total' => (float) $order->total,
+                ]
+            );
+
+            return $order->load('items');
+        });
+    }
+
     protected function recordLoyaltyTransactions(Order $order, array $preview): void
     {
+        if (! $order->user_id) {
+            return;
+        }
+
         $cashbackApplied = round((float) data_get($preview, 'loyalty.cashback.applied_amount', 0), 2);
         $cashbackEarned = round((float) data_get($preview, 'loyalty.cashback.earn.amount', 0), 2);
 
@@ -227,36 +407,70 @@ class OrderService
 
     protected function recordCouponRedemption(Order $order, array $preview): void
     {
-        $couponId = data_get($preview, 'coupon.id');
-        $couponDiscount = round((float) data_get($preview, 'coupon.discount_amount', 0), 2);
+        $previewCoupons = collect(data_get($preview, 'coupons', []));
 
-        if (!$couponId || $couponDiscount <= 0) {
-            return;
+        if ($previewCoupons->isEmpty() && data_get($preview, 'coupon.id')) {
+            $previewCoupons = collect([data_get($preview, 'coupon')]);
         }
 
-        $alreadyExists = CouponRedemption::query()
-            ->where('coupon_id', $couponId)
-            ->where('order_id', $order->id)
-            ->exists();
+        foreach ($previewCoupons as $previewCoupon) {
+            $couponId = data_get($previewCoupon, 'id');
+            $couponDiscount = round((float) data_get($previewCoupon, 'discount_amount', 0), 2);
 
-        if ($alreadyExists) {
+            if (!$couponId || $couponDiscount <= 0) {
+                continue;
+            }
+
+            $alreadyExists = CouponRedemption::query()
+                ->where('coupon_id', $couponId)
+                ->where('order_id', $order->id)
+                ->exists();
+
+            if ($alreadyExists) {
+                continue;
+            }
+
+            CouponRedemption::create([
+                'coupon_id' => $couponId,
+                'user_id' => $order->user_id,
+                'order_id' => $order->id,
+                'discount_amount' => $couponDiscount,
+                'metadata' => [
+                    'order_number' => $order->number,
+                    'coupon' => $previewCoupon,
+                ],
+            ]);
+
+            Coupon::query()
+                ->whereKey($couponId)
+                ->increment('usage_count');
+
+            $this->sendFollowUpCoupons($order, (int) $couponId);
+        }
+    }
+
+    protected function sendFollowUpCoupons(Order $order, int $triggerCouponId): void
+    {
+        $email = $order->user?->email ?: data_get($order->metadata, 'guest.email');
+
+        if (blank($email)) {
             return;
         }
-
-        CouponRedemption::create([
-            'coupon_id' => $couponId,
-            'user_id' => $order->user_id,
-            'order_id' => $order->id,
-            'discount_amount' => $couponDiscount,
-            'metadata' => [
-                'order_number' => $order->number,
-                'coupon' => data_get($preview, 'coupon'),
-            ],
-        ]);
 
         Coupon::query()
-            ->whereKey($couponId)
-            ->increment('usage_count');
+            ->where('trigger_coupon_id', $triggerCouponId)
+            ->active()
+            ->currentWindow()
+            ->get()
+            ->each(function (Coupon $coupon) use ($email, $order) {
+                Mail::to($email)->queue(new CouponMarketingMail(
+                    coupon: $coupon,
+                    customMessage: data_get($coupon->metadata, 'follow_up.message')
+                        ?: "Gracias por tu compra {$order->number}. Te dejamos este cupón para tu próxima compra.",
+                    customSubject: data_get($coupon->metadata, 'follow_up.subject')
+                        ?: "Nuevo cupón para tu próxima compra"
+                ));
+            });
     }
 
     public function restoreCartFromPendingOrder(Order $order, User $user, string $reason = 'payment_cancelled'): Cart

@@ -27,4 +27,35 @@ class SendCouponRequest extends FormRequest
             'message' => ['nullable', 'string', 'max:1000'],
         ];
     }
+
+    public function messages(): array
+    {
+        return [
+            'channels.required' => 'Debes seleccionar al menos un canal de envío.',
+            'channels.array' => 'Los canales deben enviarse como una lista.',
+            'channels.min' => 'Debes seleccionar al menos un canal de envío.',
+            'channels.*.in' => 'El canal seleccionado no es válido.',
+            'user_ids.array' => 'Los usuarios deben enviarse como una lista.',
+            'user_ids.*.exists' => 'Uno de los usuarios seleccionados no existe.',
+            'emails.array' => 'Los correos deben enviarse como una lista.',
+            'emails.*.email' => 'Uno de los correos no tiene un formato válido.',
+            'emails.*.max' => 'Uno de los correos supera el máximo de 255 caracteres.',
+            'whatsapp_numbers.array' => 'Los números de WhatsApp deben enviarse como una lista.',
+            'whatsapp_numbers.*.max' => 'Uno de los números de WhatsApp supera el máximo de 30 caracteres.',
+            'subject.max' => 'El asunto no puede superar 255 caracteres.',
+            'message.max' => 'El mensaje no puede superar 1000 caracteres.',
+        ];
+    }
+
+    public function attributes(): array
+    {
+        return [
+            'channels' => 'canales',
+            'user_ids' => 'usuarios',
+            'emails' => 'correos',
+            'whatsapp_numbers' => 'números de WhatsApp',
+            'subject' => 'asunto',
+            'message' => 'mensaje',
+        ];
+    }
 }

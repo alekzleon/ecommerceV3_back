@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -20,10 +21,13 @@ class Coupon extends Model
         'discount_value',
         'is_active',
         'is_general',
+        'is_combinable',
         'starts_at',
         'ends_at',
         'usage_limit',
+        'per_user_usage_limit',
         'usage_count',
+        'trigger_coupon_id',
         'metadata',
     ];
 
@@ -31,9 +35,11 @@ class Coupon extends Model
         'discount_value' => 'decimal:2',
         'is_active' => 'boolean',
         'is_general' => 'boolean',
+        'is_combinable' => 'boolean',
         'starts_at' => 'datetime',
         'ends_at' => 'datetime',
         'usage_limit' => 'integer',
+        'per_user_usage_limit' => 'integer',
         'usage_count' => 'integer',
         'metadata' => 'array',
     ];
@@ -46,6 +52,16 @@ class Coupon extends Model
     public function redemptions(): HasMany
     {
         return $this->hasMany(CouponRedemption::class);
+    }
+
+    public function triggerCoupon(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'trigger_coupon_id');
+    }
+
+    public function followUpCoupons(): HasMany
+    {
+        return $this->hasMany(self::class, 'trigger_coupon_id');
     }
 
     public function scopeActive(Builder $query): Builder

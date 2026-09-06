@@ -140,9 +140,13 @@ class AddressController extends Controller
                 'alias',
                 'street',
                 'address_line_2',
+                'external_number',
+                'internal_number',
                 'zip_code',
                 'neighborhood',
+                'city',
                 'state',
+                'references',
                 'contact_name',
                 'phone',
                 'is_default',
@@ -151,6 +155,12 @@ class AddressController extends Controller
 
         if (array_key_exists('delivery_note', $validated)) {
             $data['references'] = $validated['delivery_note'];
+        }
+
+        if (blank($data['alias'] ?? null)) {
+            $data['alias'] = filled($data['contact_name'] ?? null)
+                ? 'Dirección de ' . $data['contact_name']
+                : 'Dirección principal';
         }
 
         return $data;

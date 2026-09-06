@@ -19,13 +19,17 @@ class StoreAddressRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'alias' => ['required', 'string', 'max:100'],
-            'street' => ['required', 'string', 'max:150'],
+            'alias' => ['nullable', 'string', 'max:100'],
+            'street' => ['required', 'string', 'max:500'],
             'address_line_2' => ['nullable', 'string', 'max:190'],
-            'zip_code' => ['required', 'string', 'max:20'],
-            'neighborhood' => ['required', 'string', 'max:150'],
-            'state' => ['required', 'string', 'max:150'],
+            'external_number' => ['nullable', 'string', 'max:50'],
+            'internal_number' => ['nullable', 'string', 'max:50'],
+            'zip_code' => ['nullable', 'string', 'max:20'],
+            'neighborhood' => ['nullable', 'string', 'max:150'],
+            'city' => ['nullable', 'string', 'max:150'],
+            'state' => ['nullable', 'string', 'max:150'],
             'delivery_note' => ['nullable', 'string'],
+            'references' => ['nullable', 'string'],
             'contact_name' => ['required', 'string', 'max:150'],
             'phone' => ['required', 'string', 'max:30'],
             'is_default' => ['nullable', 'boolean'],
@@ -35,11 +39,8 @@ class StoreAddressRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'alias.required' => 'El nombre de la dirección es obligatorio.',
             'street.required' => 'La calle o dirección es obligatoria.',
-            'zip_code.required' => 'El código postal es obligatorio.',
-            'neighborhood.required' => 'La colonia es obligatoria.',
-            'state.required' => 'El estado es obligatorio.',
+            'street.max' => 'La dirección no puede superar 500 caracteres.',
             'contact_name.required' => 'El contacto de entrega es obligatorio.',
             'phone.required' => 'El teléfono de entrega es obligatorio.',
         ];
@@ -53,10 +54,14 @@ class StoreAddressRequest extends FormRequest
             'alias',
             'street',
             'address_line_2',
+            'external_number',
+            'internal_number',
             'zip_code',
             'neighborhood',
+            'city',
             'state',
             'delivery_note',
+            'references',
             'contact_name',
             'phone',
         ] as $field) {

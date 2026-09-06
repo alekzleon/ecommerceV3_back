@@ -17,6 +17,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -35,7 +36,7 @@ class StripePaymentService
 
         $secretKey = config('services.stripe.secret_key');
 
-        abort_if(blank($secretKey), 500, 'Stripe no está configurado.');
+        abort_if(blank($secretKey), 422, $this->invalidStorePaymentMethodMessage());
 
         $order->loadMissing(['items', 'user']);
         $this->validateOrderStock($order);
@@ -52,7 +53,7 @@ class StripePaymentService
             'success_url' => $this->successUrl($storefrontOrigin),
             'cancel_url' => $this->cancelUrl($order, $storefrontOrigin),
             'client_reference_id' => (string) $order->id,
-            'customer_email' => $order->user?->email,
+            'customer_email' => $order->user?->email ?: data_get($order->metadata, 'guest.email'),
             'metadata' => $stripeMetadata,
             'payment_intent_data' => [
                 'metadata' => $stripeMetadata,
@@ -71,8 +72,14 @@ class StripePaymentService
                 ->throw()
                 ->json();
         } catch (RequestException $exception) {
-            $message = data_get($exception->response?->json(), 'error.message', 'No fue posible iniciar el pago con Stripe.');
-            throw new HttpException(422, $message, $exception);
+            Log::warning('Stripe checkout session failed for store checkout.', [
+                'order_id' => $order->id,
+                'tenant_id' => tenant('id'),
+                'stripe_account_id' => $stripeAccountId,
+                'stripe_message' => data_get($exception->response?->json(), 'error.message'),
+            ]);
+
+            throw new HttpException(422, $this->invalidStorePaymentMethodMessage(), $exception);
         }
 
         $order->forceFill([
@@ -364,8 +371,15 @@ class StripePaymentService
                 ->throw()
                 ->json();
         } catch (RequestException $exception) {
-            $message = data_get($exception->response?->json(), 'error.message', 'No fue posible consultar la sesión de Stripe.');
-            throw new HttpException(422, $message, $exception);
+            Log::warning('Stripe existing checkout session lookup failed for store checkout.', [
+                'order_id' => $order->id,
+                'tenant_id' => tenant('id'),
+                'stripe_session_id' => $order->stripe_session_id,
+                'stripe_account_id' => $stripeAccountId,
+                'stripe_message' => data_get($exception->response?->json(), 'error.message'),
+            ]);
+
+            throw new HttpException(422, $this->invalidStorePaymentMethodMessage(), $exception);
         }
 
         $order = $this->findOrder($session);
@@ -1006,6 +1020,8 @@ class StripePaymentService
             'order_id' => (string) $order->id,
             'order_number' => $order->number,
             'user_id' => (string) $order->user_id,
+            'guest_token' => (string) $order->guest_token,
+            'checkout_mode' => $order->guest_token ? 'guest' : 'authenticated',
             'checkout_type' => 'store_order',
         ];
 
@@ -1022,16 +1038,21 @@ class StripePaymentService
         abort_unless(
             (bool) data_get(EcommerceSetting::paymentMethodSettings(), 'methods.stripe.enabled', false),
             422,
-            'El método de pago con Stripe no está activo para esta tienda.'
+            $this->invalidStorePaymentMethodMessage()
         );
 
         $connectAccount = tenant()?->stripeAccount;
 
         if (! $connectAccount || ! $connectAccount->isReadyForCharges()) {
-            abort(422, 'La tienda debe conectar y completar Stripe antes de recibir pagos.');
+            abort(422, $this->invalidStorePaymentMethodMessage());
         }
 
         return $connectAccount->stripe_account_id;
+    }
+
+    protected function invalidStorePaymentMethodMessage(): string
+    {
+        return 'Esta tienda no cuenta con una configuración de método de pago válida, puedes comunicarte con su soporte.';
     }
 
     protected function stripeAccountIdForSession(string $sessionId): ?string

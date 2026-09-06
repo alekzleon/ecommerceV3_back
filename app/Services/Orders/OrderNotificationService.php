@@ -24,7 +24,7 @@ class OrderNotificationService
 
             if ($sent) {
                 data_set($metadata, 'notifications.purchase_email.sent_at', now()->toISOString());
-                data_set($metadata, 'notifications.purchase_email.to', $order->user?->email);
+                data_set($metadata, 'notifications.purchase_email.to', $this->resolveCustomerEmail($order));
             }
         }
 
@@ -76,7 +76,7 @@ class OrderNotificationService
         bool $adminNotification = false
     ): bool {
         $order->loadMissing(['user', 'items', 'payments']);
-        $recipient = $to ?: $order->user?->email;
+        $recipient = $to ?: $this->resolveCustomerEmail($order);
 
         if (blank($recipient)) {
             Log::warning('Order purchase email skipped: missing recipient.', [
@@ -170,7 +170,26 @@ class OrderNotificationService
 
     private function resolveWhatsAppNumber(Order $order): ?string
     {
-        return '+523332244005';
+        $phone = preg_replace('/\D+/', '', (string) (
+            $order->user?->phone
+            ?: data_get($order->metadata, 'guest.phone')
+            ?: data_get($order->shipping_address_snapshot, 'phone')
+        ));
+
+        if (blank($phone)) {
+            return null;
+        }
+
+        if (str_starts_with($phone, '52')) {
+            return '+' . $phone;
+        }
+
+        return '+52' . $phone;
+    }
+
+    private function resolveCustomerEmail(Order $order): ?string
+    {
+        return $order->user?->email ?: data_get($order->metadata, 'guest.email');
     }
 
     private function resolveAdminEmail(?array $settings = null): ?string

@@ -17,6 +17,7 @@ use App\Models\VariantAttributeValue;
 use App\Services\ProductPriceService;
 use App\Services\Promotions\PromotionEngine;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class CartService
 {
@@ -31,6 +32,20 @@ class CartService
     {
         return Cart::query()
             ->forUser($user->id)
+            ->active()
+            ->with([
+                'user',
+                'items.product.category',
+                'items.product.family',
+            ])
+            ->latest('id')
+            ->first();
+    }
+
+    public function getActiveGuestCart(string $guestToken): ?Cart
+    {
+        return Cart::query()
+            ->forGuest($guestToken)
             ->active()
             ->with([
                 'user',
@@ -76,11 +91,77 @@ class CartService
         ]);
     }
 
+    public function getOrCreateGuestCart(?string $guestToken = null): Cart
+    {
+        $guestToken = $this->normalizeGuestToken($guestToken) ?: $this->newGuestToken();
+        $cart = $this->getActiveGuestCart($guestToken);
+
+        if ($cart) {
+            return $cart;
+        }
+
+        $cart = Cart::create([
+            'user_id' => null,
+            'guest_token' => $guestToken,
+            'status' => CartStatus::ACTIVE->value,
+            'currency' => 'MXN',
+            'source' => 'guest',
+            'sales_channel' => 'online_store',
+            'items_count' => 0,
+            'subtotal_snapshot' => 0,
+            'discount_snapshot' => 0,
+            'tax_snapshot' => 0,
+            'total_snapshot' => 0,
+            'last_activity_at' => now(),
+            'metadata' => [
+                'checkout_mode' => 'guest',
+            ],
+        ]);
+
+        $this->registerEvent(
+            cart: $cart,
+            user: null,
+            eventType: 'guest_cart_created',
+            eventData: ['message' => 'Carrito invitado creado automáticamente.']
+        );
+
+        return $cart->load([
+            'user',
+            'items.product.category',
+            'items.product.family',
+        ]);
+    }
+
     public function addItem(User $user, Product $product, float $quantity = 1, array $attributeValueIds = []): Cart
     {
-        return DB::transaction(function () use ($user, $product, $quantity, $attributeValueIds) {
-            $cart = $this->getOrCreateActiveCart($user);
+        return $this->addItemToCart(
+            cart: $this->getOrCreateActiveCart($user),
+            user: $user,
+            product: $product,
+            quantity: $quantity,
+            attributeValueIds: $attributeValueIds
+        );
+    }
 
+    public function addGuestItem(?string $guestToken, Product $product, float $quantity = 1, array $attributeValueIds = []): Cart
+    {
+        return $this->addItemToCart(
+            cart: $this->getOrCreateGuestCart($guestToken),
+            user: null,
+            product: $product,
+            quantity: $quantity,
+            attributeValueIds: $attributeValueIds
+        );
+    }
+
+    protected function addItemToCart(Cart $cart, ?User $user, Product $product, float $quantity = 1, array $attributeValueIds = []): Cart
+    {
+        return DB::transaction(function () use ($cart, $user, $product, $quantity, $attributeValueIds) {
+            $cart = Cart::query()
+                ->with(['user', 'items.product.category', 'items.product.family'])
+                ->whereKey($cart->id)
+                ->lockForUpdate()
+                ->firstOrFail();
             $quantity = round((float) $quantity, 2);
 
             if ($quantity <= 0) {
@@ -195,6 +276,53 @@ class CartService
         });
     }
 
+    public function updateGuestItemQuantity(string $guestToken, CartItem $item, float $quantity): Cart
+    {
+        return DB::transaction(function () use ($guestToken, $item, $quantity) {
+            $cart = $item->cart()->with([
+                'user',
+                'items.product.category',
+                'items.product.family',
+            ])->firstOrFail();
+
+            $this->ensureGuestCartOwnership($cart, $guestToken);
+
+            $quantity = round((float) $quantity, 2);
+
+            if ($quantity <= 0) {
+                return $this->removeGuestItem($guestToken, $item);
+            }
+
+            if ($item->product) {
+                $requestedProductQuantity = $this->requestedProductQuantity($cart, $item->product, $item, $quantity);
+                $this->abortIfInsufficientStock($item->product, $requestedProductQuantity);
+            }
+
+            $item->quantity = $quantity;
+            $item->line_subtotal_snapshot = round((float) $item->price_snapshot * (float) $item->quantity, 2);
+            $item->save();
+
+            $this->recalculateCart($cart);
+
+            $this->registerEvent(
+                cart: $cart,
+                user: null,
+                eventType: 'item_quantity_updated',
+                cartItem: $item,
+                eventData: [
+                    'product_id' => $item->product_id,
+                    'quantity' => $quantity,
+                ]
+            );
+
+            return $cart->fresh([
+                'user',
+                'items.product.category',
+                'items.product.family',
+            ]);
+        });
+    }
+
     public function removeItem(User $user, CartItem $item): Cart
     {
         return DB::transaction(function () use ($user, $item) {
@@ -219,6 +347,47 @@ class CartService
             $this->registerEvent(
                 cart: $cart,
                 user: $user,
+                eventType: 'item_removed',
+                cartItem: $item,
+                eventData: $eventData
+            );
+
+            $item->delete();
+
+            $this->recalculateCart($cart);
+
+            return $cart->fresh([
+                'user',
+                'items.product.category',
+                'items.product.family',
+            ]);
+        });
+    }
+
+    public function removeGuestItem(string $guestToken, CartItem $item): Cart
+    {
+        return DB::transaction(function () use ($guestToken, $item) {
+            $cart = $item->cart()->with([
+                'user',
+                'items.product.category',
+                'items.product.family',
+            ])->firstOrFail();
+
+            $this->ensureGuestCartOwnership($cart, $guestToken);
+
+            $eventData = [
+                'product_id' => $item->product_id,
+                'quantity' => (float) $item->quantity,
+                'price' => (float) $item->price_snapshot,
+                'name' => $item->name_snapshot,
+                'sku' => $item->sku_snapshot,
+                'brand' => $item->brand_snapshot,
+                'line_subtotal' => (float) $item->line_subtotal_snapshot,
+            ];
+
+            $this->registerEvent(
+                cart: $cart,
+                user: null,
                 eventType: 'item_removed',
                 cartItem: $item,
                 eventData: $eventData
@@ -274,6 +443,54 @@ class CartService
                 user: $user,
                 eventType: 'cart_cleared',
                 eventData: ['message' => 'El carrito fue vaciado.']
+            );
+
+            return $cart->fresh([
+                'user',
+                'items.product.category',
+                'items.product.family',
+            ]);
+        });
+    }
+
+    public function clearGuestCart(string $guestToken): Cart
+    {
+        return DB::transaction(function () use ($guestToken) {
+            $cart = $this->getOrCreateGuestCart($guestToken);
+
+            $items = CartItem::query()
+                ->where('cart_id', $cart->id)
+                ->get();
+
+            foreach ($items as $item) {
+                $this->registerEvent(
+                    cart: $cart,
+                    user: null,
+                    eventType: 'item_removed',
+                    cartItem: $item,
+                    eventData: [
+                        'product_id' => $item->product_id,
+                        'quantity' => (float) $item->quantity,
+                        'price' => (float) $item->price_snapshot,
+                        'name' => $item->name_snapshot,
+                        'sku' => $item->sku_snapshot,
+                        'brand' => $item->brand_snapshot,
+                        'line_subtotal' => (float) $item->line_subtotal_snapshot,
+                    ]
+                );
+            }
+
+            CartItem::query()
+                ->where('cart_id', $cart->id)
+                ->delete();
+
+            $this->recalculateCart($cart);
+
+            $this->registerEvent(
+                cart: $cart,
+                user: null,
+                eventType: 'cart_cleared',
+                eventData: ['message' => 'El carrito invitado fue vaciado.']
             );
 
             return $cart->fresh([
@@ -388,26 +605,24 @@ class CartService
     {
         return DB::transaction(function () use ($user, $code) {
             $cart = $this->getOrCreateActiveCart($user);
-            $coupon = Coupon::query()
-                ->where('code', strtoupper(trim($code)))
-                ->first();
+            return $this->applyCouponToCart($cart, $code, $user);
+        });
+    }
 
-            abort_unless($coupon, 422, 'El cupón no existe.');
+    public function applyGuestCoupon(string $guestToken, string $code): Cart
+    {
+        return DB::transaction(function () use ($guestToken, $code) {
+            $cart = $this->getOrCreateGuestCart($guestToken);
+            return $this->applyCouponToCart($cart, $code, null);
+        });
+    }
 
-            $validationMessage = $this->couponValidationMessage($coupon, $user);
-            abort_if($validationMessage, 422, $validationMessage);
-
+    public function clearCoupon(User $user): Cart
+    {
+        return DB::transaction(function () use ($user) {
+            $cart = $this->getOrCreateActiveCart($user);
             $metadata = $cart->metadata ?? [];
-            $metadata['coupon'] = [
-                'id' => $coupon->id,
-                'code' => $coupon->code,
-                'name' => $coupon->name,
-                'discount_type' => $coupon->discount_type,
-                'discount_value' => (float) $coupon->discount_value,
-                'is_valid' => true,
-                'message' => 'Cupón aplicado correctamente.',
-                'discount_amount' => 0,
-            ];
+            unset($metadata['coupon'], $metadata['coupons']);
 
             $cart->forceFill([
                 'metadata' => $metadata,
@@ -418,12 +633,12 @@ class CartService
         });
     }
 
-    public function clearCoupon(User $user): Cart
+    public function clearGuestCoupon(string $guestToken): Cart
     {
-        return DB::transaction(function () use ($user) {
-            $cart = $this->getOrCreateActiveCart($user);
+        return DB::transaction(function () use ($guestToken) {
+            $cart = $this->getOrCreateGuestCart($guestToken);
             $metadata = $cart->metadata ?? [];
-            unset($metadata['coupon']);
+            unset($metadata['coupon'], $metadata['coupons']);
 
             $cart->forceFill([
                 'metadata' => $metadata,
@@ -432,6 +647,44 @@ class CartService
 
             return $this->recalculateCart($cart);
         });
+    }
+
+    protected function applyCouponToCart(Cart $cart, string $code, ?User $user): Cart
+    {
+        $coupon = Coupon::query()
+            ->where('code', strtoupper(trim($code)))
+            ->first();
+
+        abort_unless($coupon, 422, 'El cupón no existe.');
+
+        $validationMessage = $this->couponValidationMessage($coupon, $user);
+        abort_if($validationMessage, 422, $validationMessage);
+
+        $metadata = $cart->metadata ?? [];
+        $appliedCoupons = $this->normalizedAppliedCoupons($metadata);
+
+        abort_if(
+            $appliedCoupons->contains(fn ($appliedCoupon) => (int) data_get($appliedCoupon, 'id') === (int) $coupon->id),
+            422,
+            'El cupón ya está aplicado.'
+        );
+
+        abort_if(
+            $appliedCoupons->isNotEmpty() && (!$coupon->is_combinable || $appliedCoupons->contains(fn ($appliedCoupon) => ! (bool) data_get($appliedCoupon, 'is_combinable'))),
+            422,
+            'Este cupón no se puede combinar con otros cupones.'
+        );
+
+        $appliedCoupons->push($this->couponPayload($coupon, 0, true, 'Cupón aplicado correctamente.'));
+        $metadata['coupons'] = $appliedCoupons->values()->all();
+        $metadata['coupon'] = $metadata['coupons'][0] ?? null;
+
+        $cart->forceFill([
+            'metadata' => $metadata,
+            'last_activity_at' => now(),
+        ])->save();
+
+        return $this->recalculateCart($cart);
     }
 
     public function recalculateCart(Cart $cart): Cart
@@ -496,34 +749,50 @@ class CartService
 
         $itemDiscount = round((float) $cart->items->sum('line_discount_snapshot'), 2);
         $firstPurchaseBase = max(0, round($subtotal - $itemDiscount, 2));
-        $firstPurchaseDiscount = $this->loyaltyService->firstPurchaseDiscount($cart->user, $firstPurchaseBase);
+        $firstPurchaseDiscount = $cart->user
+            ? $this->loyaltyService->firstPurchaseDiscount($cart->user, $firstPurchaseBase)
+            : [
+                'enabled' => false,
+                'eligible' => false,
+                'percentage' => 0,
+                'amount' => 0.0,
+            ];
         $taxBreakdown = $this->calculateTaxes($cart);
         $tax = round((float) $taxBreakdown['total'], 2);
         $metadata = $cart->metadata ?? [];
-        $coupon = $this->calculateCouponDiscount(
+        $couponResult = $this->calculateCouponsDiscount(
             cart: $cart,
             baseAmount: max(0, round($subtotal - $itemDiscount - $firstPurchaseDiscount['amount'], 2)),
             metadata: $metadata
         );
-        $preCashbackTotal = max(0, round($subtotal - $itemDiscount - $firstPurchaseDiscount['amount'] - $coupon['discount_amount'] + $tax, 2));
+        $preCashbackTotal = max(0, round($subtotal - $itemDiscount - $firstPurchaseDiscount['amount'] - $couponResult['discount_amount'] + $tax, 2));
         $cashbackRequested = round((float) data_get($metadata, 'loyalty.cashback.applied_amount', 0), 2);
-        $cashbackApplied = min($cashbackRequested, $this->loyaltyService->maxRedeemable($cart->user, $preCashbackTotal));
-        $cashbackEarn = $this->loyaltyService->cashbackEarn(max(0, round($preCashbackTotal - $cashbackApplied, 2)));
-        $discount = round($itemDiscount + $firstPurchaseDiscount['amount'] + $coupon['discount_amount'] + $cashbackApplied, 2);
+        $cashbackApplied = $cart->user
+            ? min($cashbackRequested, $this->loyaltyService->maxRedeemable($cart->user, $preCashbackTotal))
+            : 0.0;
+        $cashbackEarn = $cart->user
+            ? $this->loyaltyService->cashbackEarn(max(0, round($preCashbackTotal - $cashbackApplied, 2)))
+            : [
+                'enabled' => false,
+                'percentage' => 0,
+                'amount' => 0.0,
+            ];
+        $discount = round($itemDiscount + $firstPurchaseDiscount['amount'] + $couponResult['discount_amount'] + $cashbackApplied, 2);
         $total = max(0, round($preCashbackTotal - $cashbackApplied, 2));
 
         $metadata['taxes'] = $taxBreakdown;
 
-        if ($coupon['id'] || $coupon['code']) {
-            $metadata['coupon'] = $coupon;
+        if ($couponResult['coupons'] !== []) {
+            $metadata['coupons'] = $couponResult['coupons'];
+            $metadata['coupon'] = $couponResult['summary'];
         } else {
-            unset($metadata['coupon']);
+            unset($metadata['coupon'], $metadata['coupons']);
         }
         $metadata['loyalty'] = [
             'first_purchase_discount' => $firstPurchaseDiscount,
             'cashback' => [
-                'available_balance' => $this->loyaltyService->availableCashback($cart->user),
-                'max_redeemable' => $this->loyaltyService->maxRedeemable($cart->user, $preCashbackTotal),
+                'available_balance' => $cart->user ? $this->loyaltyService->availableCashback($cart->user) : 0.0,
+                'max_redeemable' => $cart->user ? $this->loyaltyService->maxRedeemable($cart->user, $preCashbackTotal) : 0.0,
                 'applied_amount' => $cashbackApplied,
                 'earn' => $cashbackEarn,
             ],
@@ -548,7 +817,7 @@ class CartService
 
     public function registerEvent(
         Cart $cart,
-        User $user,
+        ?User $user,
         string $eventType,
         ?CartItem $cartItem = null,
         ?int $cartItemId = null,
@@ -557,7 +826,7 @@ class CartService
         return CartEvent::create([
             'cart_id' => $cart->id,
             'cart_item_id' => $cartItem?->id ?? $cartItemId,
-            'user_id' => $user->id,
+            'user_id' => $user?->id,
             'event_type' => $eventType,
             'event_data' => $eventData,
             'created_at' => now(),
@@ -819,6 +1088,70 @@ class CartService
         ];
     }
 
+    protected function calculateCouponsDiscount(Cart $cart, float $baseAmount, array $metadata): array
+    {
+        $appliedCoupons = $this->normalizedAppliedCoupons($metadata);
+
+        if ($appliedCoupons->isEmpty()) {
+            return [
+                'discount_amount' => 0,
+                'coupons' => [],
+                'summary' => null,
+            ];
+        }
+
+        $remainingBase = $baseAmount;
+        $discountTotal = 0.0;
+        $coupons = [];
+
+        foreach ($appliedCoupons as $appliedCoupon) {
+            $coupon = Coupon::query()
+                ->when(data_get($appliedCoupon, 'id'), fn ($query, $id) => $query->whereKey($id))
+                ->when(! data_get($appliedCoupon, 'id') && data_get($appliedCoupon, 'code'), fn ($query) => $query->where('code', strtoupper((string) data_get($appliedCoupon, 'code'))))
+                ->first();
+
+            if (!$coupon) {
+                $coupons[] = [
+                    ...$appliedCoupon,
+                    'discount_amount' => 0,
+                    'is_valid' => false,
+                    'message' => 'El cupón ya no existe.',
+                ];
+                continue;
+            }
+
+            $validationMessage = $this->couponValidationMessage($coupon, $cart->user);
+
+            if ($validationMessage) {
+                $coupons[] = $this->couponPayload($coupon, 0, false, $validationMessage);
+                continue;
+            }
+
+            $discountAmount = $coupon->discount_type === Coupon::DISCOUNT_TYPE_PERCENTAGE
+                ? round($remainingBase * ((float) $coupon->discount_value / 100), 2)
+                : round((float) $coupon->discount_value, 2);
+
+            $discountAmount = min($discountAmount, $remainingBase);
+            $remainingBase = max(0, round($remainingBase - $discountAmount, 2));
+            $discountTotal = round($discountTotal + $discountAmount, 2);
+            $coupons[] = $this->couponPayload($coupon, $discountAmount, true, 'Cupón aplicado correctamente.');
+        }
+
+        $summary = $coupons[0] ?? null;
+
+        if ($summary) {
+            $summary['discount_amount'] = $discountTotal;
+            $summary['codes'] = collect($coupons)->pluck('code')->filter()->values()->all();
+            $summary['count'] = count($coupons);
+        }
+
+        return [
+            'discount_amount' => $discountTotal,
+            'coupons' => $coupons,
+            'summary' => $summary,
+        ];
+    }
+
     protected function calculateCouponDiscount(Cart $cart, float $baseAmount, array $metadata): array
     {
         $couponId = data_get($metadata, 'coupon.id');
@@ -888,7 +1221,7 @@ class CartService
         ];
     }
 
-    protected function couponValidationMessage(Coupon $coupon, User $user): ?string
+    protected function couponValidationMessage(Coupon $coupon, ?User $user): ?string
     {
         if (!$coupon->is_active) {
             return 'El cupón no está activo.';
@@ -906,16 +1239,79 @@ class CartService
             return 'El cupón ya alcanzó su límite de usos.';
         }
 
-        if (!$coupon->is_general && !$coupon->users()->whereKey($user->id)->exists()) {
+        if ($user && $coupon->per_user_usage_limit !== null) {
+            $userUsageCount = $coupon->redemptions()->where('user_id', $user->id)->count();
+
+            if ($userUsageCount >= $coupon->per_user_usage_limit) {
+                return 'Ya alcanzaste el límite de usos de este cupón.';
+            }
+        }
+
+        if (!$coupon->is_general && (! $user || ! $coupon->users()->whereKey($user->id)->exists())) {
             return 'Este cupón no está asignado a tu cuenta.';
         }
 
         return null;
     }
 
+    protected function normalizedAppliedCoupons(array $metadata)
+    {
+        $coupons = collect(data_get($metadata, 'coupons', []));
+
+        if ($coupons->isEmpty() && data_get($metadata, 'coupon')) {
+            $coupons = collect([data_get($metadata, 'coupon')]);
+        }
+
+        return $coupons
+            ->filter(fn ($coupon) => data_get($coupon, 'id') || data_get($coupon, 'code'))
+            ->unique(fn ($coupon) => data_get($coupon, 'id') ?: strtoupper((string) data_get($coupon, 'code')))
+            ->values();
+    }
+
+    protected function couponPayload(Coupon $coupon, float $discountAmount = 0, bool $isValid = true, ?string $message = null): array
+    {
+        return [
+            'id' => $coupon->id,
+            'code' => $coupon->code,
+            'name' => $coupon->name,
+            'discount_type' => $coupon->discount_type,
+            'discount_value' => (float) $coupon->discount_value,
+            'is_combinable' => (bool) $coupon->is_combinable,
+            'discount_amount' => round($discountAmount, 2),
+            'is_valid' => $isValid,
+            'message' => $message,
+        ];
+    }
+
     protected function ensureCartOwnership(Cart $cart, User $user): void
     {
         abort_unless((int) $cart->user_id === (int) $user->id, 403, 'No tienes acceso a este carrito.');
         abort_unless($cart->status === CartStatus::ACTIVE->value, 422, 'El carrito no está activo.');
+    }
+
+    protected function ensureGuestCartOwnership(Cart $cart, string $guestToken): void
+    {
+        abort_unless(hash_equals((string) $cart->guest_token, $this->normalizeGuestToken($guestToken)), 403, 'No tienes acceso a este carrito.');
+        abort_unless($cart->status === CartStatus::ACTIVE->value, 422, 'El carrito no está activo.');
+    }
+
+    public function normalizeGuestToken(?string $guestToken): ?string
+    {
+        $guestToken = trim((string) $guestToken);
+
+        if ($guestToken === '' || strlen($guestToken) > 80 || ! preg_match('/^[A-Za-z0-9]+$/', $guestToken)) {
+            return null;
+        }
+
+        return $guestToken;
+    }
+
+    protected function newGuestToken(): string
+    {
+        do {
+            $token = Str::random(64);
+        } while (Cart::query()->where('guest_token', $token)->exists());
+
+        return $token;
     }
 }

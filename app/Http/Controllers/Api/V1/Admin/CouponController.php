@@ -14,6 +14,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Carbon;
 
 class CouponController extends Controller
 {
@@ -22,7 +23,7 @@ class CouponController extends Controller
         $perPage = max(1, min((int) $request->integer('per_page', 20), 100));
 
         $query = Coupon::query()
-            ->with(['users:id,name,email,username'])
+            ->with(['users:id,name,email,username', 'triggerCoupon:id,code,name'])
             ->withCount(['users', 'redemptions'])
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = trim((string) $request->input('search'));
@@ -81,6 +82,16 @@ class CouponController extends Controller
             ])
             ->values();
 
+        $coupons = Coupon::query()
+            ->orderBy('code')
+            ->get(['id', 'code', 'name'])
+            ->map(fn (Coupon $coupon) => [
+                'id' => $coupon->id,
+                'code' => $coupon->code,
+                'name' => $coupon->name,
+            ])
+            ->values();
+
         return response()->json([
             'ok' => true,
             'data' => [
@@ -89,6 +100,7 @@ class CouponController extends Controller
                     ['value' => Coupon::DISCOUNT_TYPE_PERCENTAGE, 'label' => 'Porcentaje'],
                 ],
                 'clients' => $clients,
+                'coupons' => $coupons,
                 'channels' => [
                     ['value' => 'email', 'label' => 'Correo'],
                     ['value' => 'whatsapp', 'label' => 'WhatsApp'],
@@ -101,8 +113,15 @@ class CouponController extends Controller
     {
         $data = $request->validated();
         $userIds = $data['user_ids'] ?? [];
+        $campaign = $data['campaign'] ?? null;
+        $metadata = $data['metadata'] ?? [];
 
-        unset($data['user_ids']);
+        if ($campaign) {
+            data_set($metadata, 'campaign', $campaign);
+            $data['metadata'] = $metadata;
+        }
+
+        unset($data['user_ids'], $data['campaign']);
 
         $coupon = Coupon::create($data);
 
@@ -110,10 +129,12 @@ class CouponController extends Controller
             $coupon->users()->sync($userIds);
         }
 
+        $this->scheduleEmailCampaignIfRequested($coupon->fresh('users'), $campaign);
+
         return response()->json([
             'ok' => true,
             'message' => 'Cupón creado correctamente.',
-            'data' => new CouponResource($coupon->fresh()->load('users')),
+            'data' => new CouponResource($coupon->fresh()->load(['users', 'triggerCoupon'])),
         ], 201);
     }
 
@@ -121,7 +142,7 @@ class CouponController extends Controller
     {
         return response()->json([
             'ok' => true,
-            'data' => new CouponResource($coupon->load('users')),
+            'data' => new CouponResource($coupon->load(['users', 'triggerCoupon'])),
         ]);
     }
 
@@ -129,8 +150,15 @@ class CouponController extends Controller
     {
         $data = $request->validated();
         $userIds = $data['user_ids'] ?? [];
+        $campaign = $data['campaign'] ?? null;
+        $metadata = $data['metadata'] ?? ($coupon->metadata ?? []);
 
-        unset($data['user_ids']);
+        if ($campaign) {
+            data_set($metadata, 'campaign', $campaign);
+            $data['metadata'] = $metadata;
+        }
+
+        unset($data['user_ids'], $data['campaign']);
 
         $coupon->update($data);
 
@@ -140,10 +168,42 @@ class CouponController extends Controller
             $coupon->users()->sync($userIds);
         }
 
+        $this->scheduleEmailCampaignIfRequested($coupon->fresh('users'), $campaign);
+
         return response()->json([
             'ok' => true,
             'message' => 'Cupón actualizado correctamente.',
-            'data' => new CouponResource($coupon->fresh()->load('users')),
+            'data' => new CouponResource($coupon->fresh()->load(['users', 'triggerCoupon'])),
+        ]);
+    }
+
+    public function assignUsers(Request $request, Coupon $coupon): JsonResponse
+    {
+        $data = $request->validate([
+            'user_ids' => ['required', 'array', 'min:1'],
+            'user_ids.*' => ['integer', 'exists:users,id'],
+        ], [
+            'user_ids.required' => 'Debes seleccionar al menos un usuario.',
+            'user_ids.array' => 'Los usuarios asignados deben enviarse como una lista.',
+            'user_ids.min' => 'Debes seleccionar al menos un usuario.',
+            'user_ids.*.exists' => 'Uno de los usuarios seleccionados no existe.',
+        ]);
+
+        $userIds = collect($data['user_ids'])->map(fn ($id) => (int) $id)->unique()->values();
+        $clientIds = User::query()
+            ->whereIn('id', $userIds)
+            ->where('role_id', User::ROLE_CLIENTE)
+            ->pluck('id');
+
+        abort_if($userIds->diff($clientIds)->isNotEmpty(), 422, 'Solo puedes asignar clientes al cupón.');
+
+        $coupon->forceFill(['is_general' => false])->save();
+        $coupon->users()->sync($userIds);
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Usuarios asignados al cupón correctamente.',
+            'data' => new CouponResource($coupon->fresh()->load(['users', 'triggerCoupon'])),
         ]);
     }
 
@@ -166,7 +226,7 @@ class CouponController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Estado del cupón actualizado correctamente.',
-            'data' => new CouponResource($coupon->fresh()->load('users')),
+            'data' => new CouponResource($coupon->fresh()->load(['users', 'triggerCoupon'])),
         ]);
     }
 
@@ -235,5 +295,40 @@ class CouponController extends Controller
         $expires = $coupon->ends_at ? "\nVálido hasta: {$coupon->ends_at->toDateTimeString()}" : '';
 
         return "{$message}\nCupón: {$coupon->code}\nDescuento: {$discount}{$expires}";
+    }
+
+    protected function scheduleEmailCampaignIfRequested(Coupon $coupon, ?array $campaign): void
+    {
+        if (! filter_var(data_get($campaign, 'send_email', false), FILTER_VALIDATE_BOOL)) {
+            return;
+        }
+
+        $users = User::query()
+            ->where('role_id', User::ROLE_CLIENTE)
+            ->when(data_get($campaign, 'user_ids'), fn ($query, $ids) => $query->whereIn('id', $ids))
+            ->whereNotNull('email')
+            ->get(['id', 'email']);
+
+        $sendAt = data_get($campaign, 'send_at') ? Carbon::parse(data_get($campaign, 'send_at')) : null;
+
+        foreach ($users as $user) {
+            $mail = Mail::to($user->email);
+
+            if ($sendAt && $sendAt->isFuture()) {
+                $mail->later($sendAt, new CouponMarketingMail(
+                    coupon: $coupon,
+                    customMessage: data_get($campaign, 'message'),
+                    customSubject: data_get($campaign, 'subject')
+                ));
+
+                continue;
+            }
+
+            $mail->queue(new CouponMarketingMail(
+                coupon: $coupon,
+                customMessage: data_get($campaign, 'message'),
+                customSubject: data_get($campaign, 'subject')
+            ));
+        }
     }
 }

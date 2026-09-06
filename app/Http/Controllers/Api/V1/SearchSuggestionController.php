@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\EcommerceSetting;
 use App\Models\Product;
 use App\Services\ProductPriceService;
 use Illuminate\Http\Request;
@@ -111,12 +112,13 @@ class SearchSuggestionController extends Controller
             ->values();
 
         $didYouMean = $this->buildDidYouMean($normalizedQuery);
+        $pricingVisibility = EcommerceSetting::pricingVisibilityForUser($request->user('sanctum') ?? $request->user());
 
         return response()->json([
             'query' => $query,
             'did_you_mean' => $didYouMean,
             'suggestions' => [
-                'products' => $products->map(function ($product) {
+                'products' => $products->map(function ($product) use ($pricingVisibility) {
                     $price = (float) $product->default_price;
 
                     return [
@@ -134,6 +136,7 @@ class SearchSuggestionController extends Controller
                             'is_default_price_list' => true,
                             'source' => 'products.default_price',
                         ],
+                        'pricing_visibility' => $pricingVisibility,
                         'category' => $product->category?->name,
                         'family' => $product->family?->name,
                     ];
