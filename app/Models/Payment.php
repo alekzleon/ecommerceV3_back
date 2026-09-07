@@ -12,9 +12,14 @@ class Payment extends Model
         'provider',
         'status',
         'payment_method',
+        'provider_reference',
+        'provider_payment_id',
+        'provider_status',
+        'external_reference',
         'stripe_session_id',
         'stripe_payment_intent_id',
         'amount',
+        'platform_fee',
         'currency',
         'paid_at',
         'provider_payload',
@@ -22,6 +27,7 @@ class Payment extends Model
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'platform_fee' => 'decimal:2',
         'paid_at' => 'datetime',
         'provider_payload' => 'array',
     ];

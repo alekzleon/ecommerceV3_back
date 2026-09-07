@@ -556,6 +556,9 @@ class OrderService
             'currency' => strtolower($order->currency),
             'created_at' => $order->created_at,
             'restore_endpoint' => "/api/v1/checkout/recoverable-order/restore",
+            'retry_payment_endpoints' => [
+                'mercadopago' => "/api/v1/checkout/orders/{$order->id}/mercadopago",
+            ],
         ];
     }
 

@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Services\CartService;
 use App\Services\Checkout\CheckoutPreviewService;
 use App\Services\Orders\OrderService;
+use App\Services\Payments\MercadoPagoPaymentReconciler;
 use App\Services\Payments\StripePaymentService;
 use App\Services\SalesChannelService;
 use Illuminate\Http\JsonResponse;
@@ -22,6 +23,7 @@ class CheckoutController extends Controller
         protected CheckoutPreviewService $checkoutPreviewService,
         protected OrderService $orderService,
         protected StripePaymentService $stripePaymentService,
+        protected MercadoPagoPaymentReconciler $mercadoPagoReconciler,
         protected SalesChannelService $salesChannelService
     ) {
     }
@@ -33,7 +35,7 @@ class CheckoutController extends Controller
         if ($recoverableOrder) {
             return response()->json([
                 'ok' => true,
-                'message' => 'Hay un carrito pendiente de recuperar antes de continuar checkout.',
+                'message' => 'Hay un pedido pendiente de pago. Puedes reintentar el pago o recuperar tu carrito.',
                 'data' => [
                     'can_checkout' => false,
                     'cart' => null,
@@ -110,13 +112,13 @@ class CheckoutController extends Controller
         if ($recoverableOrder) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Hay un carrito pendiente de recuperar antes de continuar checkout.',
+                'message' => 'Hay un pedido pendiente de pago. Puedes reintentar el pago o recuperar tu carrito.',
                 'data' => [
                     'can_checkout' => false,
                     'blockers' => [
                         [
                             'code' => 'recoverable_pending_order',
-                            'message' => 'Recupera tu carrito pendiente antes de continuar.',
+                            'message' => 'Reintenta el pago del pedido pendiente o recupera tu carrito.',
                         ],
                     ],
                     'recoverable_order' => $this->orderService->recoverableOrderPayload($recoverableOrder),
@@ -393,7 +395,7 @@ class CheckoutController extends Controller
             'reason' => ['nullable', 'string', 'max:80'],
         ]);
 
-        $order = $this->refreshStripeOrderBeforeRestore($order);
+        $order = $this->refreshPaymentOrderBeforeRestore($order);
 
         abort_unless($order->isPendingPayment(), 422, 'Este pedido ya no se puede recuperar porque no está pendiente de pago.');
 
@@ -429,7 +431,7 @@ class CheckoutController extends Controller
 
         abort_unless($order, 404, 'No hay un pedido pendiente recuperable.');
 
-        $order = $this->refreshStripeOrderBeforeRestore($order);
+        $order = $this->refreshPaymentOrderBeforeRestore($order);
 
         abort_unless($order->isPendingPayment(), 422, 'Este pedido ya no se puede recuperar porque no está pendiente de pago.');
 
@@ -541,6 +543,35 @@ class CheckoutController extends Controller
         }
 
         return $this->stripePaymentService->syncCheckoutSession($order->stripe_session_id) ?? $order;
+    }
+
+    protected function refreshPaymentOrderBeforeRestore(Order $order): Order
+    {
+        $order = $this->refreshStripeOrderBeforeRestore($order);
+
+        if (! $order->isPendingPayment()) {
+            return $order;
+        }
+
+        $payment = $order->payments()
+            ->where('provider', 'mercadopago')
+            ->where('status', Order::PAYMENT_PENDING)
+            ->whereNotNull('external_reference')
+            ->latest('id')
+            ->first();
+
+        if (! $payment) {
+            return $order;
+        }
+
+        $result = $this->mercadoPagoReconciler->reconcileByExternalReference(
+            tenant(),
+            (string) $payment->external_reference
+        );
+
+        abort_if($result && ! $result['order'], 409, 'No fue posible conciliar el pago pendiente.');
+
+        return $result['order'] ?? $order;
     }
 
     protected function ensureGuestCheckoutIsEnabled(): void

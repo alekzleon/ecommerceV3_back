@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\PromotionController as CustomerPromotionControll
 use App\Http\Controllers\Api\V1\BannerController;
 use App\Http\Controllers\Api\V1\BrandBannerController;
 use App\Http\Controllers\Api\V1\CheckoutController;
+use App\Http\Controllers\Api\V1\MercadoPagoCheckoutController;
 use App\Http\Controllers\Api\V1\ContactController;
 use App\Http\Controllers\Api\V1\ContactFaqController;
 use App\Http\Controllers\Api\V1\ContactLeadController;
@@ -22,11 +23,13 @@ use App\Http\Controllers\Api\V1\EcommerceSettingController;
 use App\Http\Controllers\Api\V1\HomeController;
 use App\Http\Controllers\Api\V1\StripeConnectWebhookController;
 use App\Http\Controllers\Api\V1\StripeWebhookController;
+use App\Http\Controllers\Api\V1\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\V1\SiteSettingController;
 use App\Http\Controllers\Api\V1\Platform\AdminAuthController as PlatformAdminAuthController;
 use App\Http\Controllers\Api\V1\Platform\AdminTenantController as PlatformAdminTenantController;
 use App\Http\Controllers\Api\V1\Platform\TenantController as PlatformTenantController;
 use App\Http\Controllers\Api\V1\Platform\TenantStripeConnectController;
+use App\Http\Controllers\Api\V1\Platform\MercadoPagoOAuthController;
 use App\Http\Controllers\Api\V1\Account\AddressController;
 use App\Http\Controllers\Api\V1\Account\CashbackController;
 use App\Http\Controllers\Api\V1\Account\OrderController as AccountOrderController;
@@ -155,7 +158,14 @@ Route::prefix('v1')->group(function () {
         Route::get('/tenant/stripe-connect/status', [TenantStripeConnectController::class, 'status']);
         Route::post('/tenant/stripe-connect/account', [TenantStripeConnectController::class, 'account']);
         Route::post('/tenant/stripe-connect/onboarding-link', [TenantStripeConnectController::class, 'onboardingLink']);
+        Route::get('/payment-providers', [MercadoPagoOAuthController::class, 'index']);
+        Route::get('/payment-providers/mercadopago', [MercadoPagoOAuthController::class, 'show']);
+        Route::post('/payment-providers/mercadopago/connect', [MercadoPagoOAuthController::class, 'connect'])
+            ->middleware('throttle:10,1');
+        Route::delete('/payment-providers/mercadopago', [MercadoPagoOAuthController::class, 'disconnect']);
     });
+
+    Route::get('/oauth/mercadopago/callback', [MercadoPagoOAuthController::class, 'callback']);
 
     /*
     |--------------------------------------------------------------------------
@@ -222,6 +232,7 @@ Route::prefix('v1')->group(function () {
     */
     Route::post('/webhooks/stripe', StripeWebhookController::class);
     Route::post('/webhooks/stripe/connect', StripeConnectWebhookController::class);
+    Route::post('/webhooks/mercadopago', MercadoPagoWebhookController::class);
 
     /*
     |--------------------------------------------------------------------------
@@ -283,6 +294,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/checkout/recoverable-order/restore', [CheckoutController::class, 'restoreRecoverableOrder']);
         Route::post('/checkout/stripe/session', [CheckoutController::class, 'createStripeSession']);
         Route::post('/checkout/stripe/session/confirm', [CheckoutController::class, 'confirmStripeSession']);
+        Route::post('/checkout/orders/{order}/mercadopago', [MercadoPagoCheckoutController::class, 'checkout']);
 
         /*
         |--------------------------------------------------------------------------

@@ -76,19 +76,40 @@ class EcommerceSettingController extends Controller
         $stripeEnabled = (bool) data_get($settings, 'methods.stripe.enabled', false);
         $stripeAvailable = (bool) data_get($connectPayload, 'ready_for_charges', false);
         $stripeActive = $stripeEnabled && $stripeAvailable;
+        $mercadoPagoConnection = tenant()->paymentConnections()
+            ->where('provider', \App\Models\TenantPaymentConnection::PROVIDER_MERCADOPAGO)
+            ->first();
+        $mercadoPagoActive = (bool) data_get($settings, 'methods.mercadopago.enabled', false)
+            && (bool) $mercadoPagoConnection?->isConnected();
+        $methods = [];
+
+        if ($stripeActive) {
+            $methods[] = [
+                'key' => 'stripe',
+                'label' => data_get($settings, 'methods.stripe.label', 'Tarjeta de crédito o débito'),
+                'provider' => 'stripe_connect',
+                'active' => true,
+            ];
+        }
+
+        if ($mercadoPagoActive) {
+            $methods[] = [
+                'key' => 'mercadopago',
+                'label' => data_get($settings, 'methods.mercadopago.label', 'Mercado Pago'),
+                'provider' => 'mercadopago',
+                'active' => true,
+            ];
+        }
 
         return response()->json([
             'ok' => true,
             'data' => [
                 'key' => EcommerceSetting::KEY_PAYMENT_METHODS,
                 'value' => [
-                    'default_method' => $stripeActive ? ($settings['default_method'] ?? 'stripe') : null,
-                    'methods' => $stripeActive ? [[
-                        'key' => 'stripe',
-                        'label' => data_get($settings, 'methods.stripe.label', 'Tarjeta de crédito o débito'),
-                        'provider' => 'stripe_connect',
-                        'active' => true,
-                    ]] : [],
+                    'default_method' => collect($methods)->contains('key', $settings['default_method'] ?? null)
+                        ? $settings['default_method']
+                        : data_get($methods, '0.key'),
+                    'methods' => $methods,
                 ],
             ],
         ]);

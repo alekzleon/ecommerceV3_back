@@ -28,7 +28,9 @@ class UpdatePaymentSettingRequest extends FormRequest
             'methods' => ['sometimes', 'array'],
             'methods.stripe' => ['sometimes', 'array'],
             'methods.stripe.enabled' => ['sometimes', 'boolean'],
-            'default_method' => ['sometimes', 'nullable', Rule::in(['stripe'])],
+            'methods.mercadopago' => ['sometimes', 'array'],
+            'methods.mercadopago.enabled' => ['sometimes', 'boolean'],
+            'default_method' => ['sometimes', 'nullable', Rule::in(['stripe', 'mercadopago'])],
         ];
     }
 }

@@ -71,6 +71,19 @@ return [
         ],
     ],
 
+    'mercadopago' => [
+        'client_id' => env('MERCADOPAGO_CLIENT_ID'),
+        'client_secret' => env('MERCADOPAGO_CLIENT_SECRET'),
+        'redirect_uri' => env('MERCADOPAGO_REDIRECT_URI'),
+        'oauth_success_url' => env('MERCADOPAGO_OAUTH_SUCCESS_URL', env('FRONTEND_URL', 'http://localhost:5173').'/settings/payments'),
+        'oauth_error_url' => env('MERCADOPAGO_OAUTH_ERROR_URL', env('FRONTEND_URL', 'http://localhost:5173').'/settings/payments'),
+        'oauth_state_ttl_seconds' => (int) env('MERCADOPAGO_OAUTH_STATE_TTL_SECONDS', 600),
+        'connect_timeout' => (int) env('MERCADOPAGO_CONNECT_TIMEOUT', 10),
+        'timeout' => (int) env('MERCADOPAGO_TIMEOUT', 20),
+        'notification_url' => env('MERCADOPAGO_NOTIFICATION_URL'),
+        'webhook_secret' => env('MERCADOPAGO_WEBHOOK_SECRET'),
+    ],
+
     'cloudflare_for_saas' => [
         'api_token' => env('CLOUDFLARE_API_TOKEN'),
         'zone_id' => env('CLOUDFLARE_ZONE_ID'),

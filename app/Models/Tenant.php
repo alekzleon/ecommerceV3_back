@@ -97,6 +97,11 @@ class Tenant extends BaseTenant implements TenantWithDatabase
         return $this->hasOne(TenantStripeAccount::class);
     }
 
+    public function paymentConnections(): HasMany
+    {
+        return $this->hasMany(TenantPaymentConnection::class);
+    }
+
     public function customDomains(): HasMany
     {
         return $this->hasMany(CustomDomain::class);

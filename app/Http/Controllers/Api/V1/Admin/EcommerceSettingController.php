@@ -263,11 +263,31 @@ class EcommerceSettingController extends Controller
                 );
             }
 
-            if (! $stripeEnabled && (bool) data_get(EcommerceSetting::storefrontSettings(), 'is_published', false)) {
-                abort(422, 'No puedes desactivar el único método de pago mientras la tienda está publicada.');
+            $settings['methods']['stripe']['enabled'] = (bool) $stripeEnabled;
+        }
+
+        $mercadoPagoEnabled = data_get($validated, 'methods.mercadopago.enabled');
+
+        if ($mercadoPagoEnabled !== null) {
+            if ($mercadoPagoEnabled) {
+                $connection = tenant()->paymentConnections()
+                    ->where('provider', \App\Models\TenantPaymentConnection::PROVIDER_MERCADOPAGO)
+                    ->first();
+
+                abort_unless(
+                    $connection?->isConnected(),
+                    422,
+                    'Conecta Mercado Pago antes de activar este método de pago.'
+                );
             }
 
-            $settings['methods']['stripe']['enabled'] = (bool) $stripeEnabled;
+            $settings['methods']['mercadopago']['enabled'] = (bool) $mercadoPagoEnabled;
+        }
+
+        if ((bool) data_get(EcommerceSetting::storefrontSettings(), 'is_published', false)
+            && ! (bool) data_get($settings, 'methods.stripe.enabled', false)
+            && ! (bool) data_get($settings, 'methods.mercadopago.enabled', false)) {
+            abort(422, 'No puedes desactivar el único método de pago mientras la tienda está publicada.');
         }
 
         if (array_key_exists('default_method', $validated)) {
@@ -313,6 +333,11 @@ class EcommerceSettingController extends Controller
         $connectPayload = $stripeConnectService->payload($connectAccount);
         $stripeEnabled = (bool) data_get($settings, 'methods.stripe.enabled', false);
         $stripeAvailable = (bool) data_get($connectPayload, 'ready_for_charges', false);
+        $mercadoPagoConnection = tenant()->paymentConnections()
+            ->where('provider', \App\Models\TenantPaymentConnection::PROVIDER_MERCADOPAGO)
+            ->first();
+        $mercadoPagoEnabled = (bool) data_get($settings, 'methods.mercadopago.enabled', false);
+        $mercadoPagoAvailable = (bool) $mercadoPagoConnection?->isConnected();
 
         $methods = [
             [
@@ -326,6 +351,16 @@ class EcommerceSettingController extends Controller
                     ? null
                     : (data_get($connectPayload, 'requirements.disabled_reason_label') ?: 'Stripe debe estar conectado y habilitado para recibir pagos.'),
                 'requirements' => data_get($connectPayload, 'requirements'),
+            ],
+            [
+                'key' => 'mercadopago',
+                'label' => data_get($settings, 'methods.mercadopago.label', 'Mercado Pago'),
+                'provider' => 'mercadopago',
+                'enabled' => $mercadoPagoEnabled,
+                'available' => $mercadoPagoAvailable,
+                'active' => $mercadoPagoEnabled && $mercadoPagoAvailable,
+                'blocking_reason' => $mercadoPagoAvailable ? null : 'Mercado Pago debe estar conectado para recibir pagos.',
+                'requirements' => [],
             ],
         ];
 

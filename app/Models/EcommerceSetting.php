@@ -89,12 +89,20 @@ class EcommerceSetting extends Model
                     'label' => 'Tarjeta de crédito o débito',
                     'provider' => 'stripe_connect',
                 ],
+                'mercadopago' => [
+                    'enabled' => false,
+                    'label' => 'Mercado Pago',
+                    'provider' => 'mercadopago',
+                ],
             ],
         ], static::getValue(static::KEY_PAYMENT_METHODS, []));
 
         $settings['methods']['stripe']['enabled'] = (bool) data_get($settings, 'methods.stripe.enabled', false);
         $settings['methods']['stripe']['label'] = data_get($settings, 'methods.stripe.label') ?: 'Tarjeta de crédito o débito';
         $settings['methods']['stripe']['provider'] = 'stripe_connect';
+        $settings['methods']['mercadopago']['enabled'] = (bool) data_get($settings, 'methods.mercadopago.enabled', false);
+        $settings['methods']['mercadopago']['label'] = data_get($settings, 'methods.mercadopago.label') ?: 'Mercado Pago';
+        $settings['methods']['mercadopago']['provider'] = 'mercadopago';
 
         if (! array_key_exists((string) ($settings['default_method'] ?? ''), $settings['methods'])) {
             $settings['default_method'] = 'stripe';

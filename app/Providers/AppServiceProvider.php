@@ -15,6 +15,7 @@ use App\Models\Role;
 use App\Models\User;
 use App\Models\UserAddress;
 use App\Observers\ActivityLogObserver;
+use App\Services\Payments\PaymentGatewayFactory;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -24,7 +25,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(PaymentGatewayFactory::class);
     }
 
     /**

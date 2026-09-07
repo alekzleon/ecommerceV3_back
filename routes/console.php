@@ -11,3 +11,4 @@ Artisan::command('inspire', function () {
 Schedule::command('carts:detect-abandoned')->everyMinute();
 Schedule::command('purchases:daily-reorder-reminders')->dailyAt('08:00');
 Schedule::command('tenants:suspend-expired-subscriptions')->hourly();
+Schedule::command('payments:refresh-tokens')->daily();
