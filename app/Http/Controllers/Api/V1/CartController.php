@@ -68,7 +68,23 @@ class CartController extends Controller
     {
         $this->ensureGuestCheckoutIsEnabled();
 
-        $cart = $this->cartService->getOrCreateGuestCart($this->guestTokenFromRequest($request));
+        $guestToken = $this->guestTokenFromRequest($request);
+        $recoverableOrder = $guestToken
+            ? $this->orderService->findRecoverableGuestPendingOrder($guestToken)
+            : null;
+
+        if ($recoverableOrder) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Hay un carrito invitado pendiente de recuperar.',
+                'data' => [
+                    'cart' => null,
+                    'recoverable_order' => $this->orderService->guestRecoverableOrderPayload($recoverableOrder),
+                ],
+            ]);
+        }
+
+        $cart = $this->cartService->getOrCreateGuestCart($guestToken);
         $cart = $this->salesChannelService->applyToCart(
             $cart,
             $this->salesChannelService->fromRequest($request),

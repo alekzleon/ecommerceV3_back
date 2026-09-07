@@ -81,8 +81,31 @@ class CheckoutController extends Controller
     {
         $this->ensureGuestCheckoutIsEnabled();
 
+        $guestToken = $this->guestTokenFromRequest($request);
+        $recoverableOrder = $guestToken
+            ? $this->orderService->findRecoverableGuestPendingOrder($guestToken)
+            : null;
+
+        if ($recoverableOrder) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Hay un pedido invitado pendiente de pago. Puedes reintentar el pago o recuperar tu carrito.',
+                'data' => [
+                    'can_checkout' => false,
+                    'cart' => null,
+                    'blockers' => [
+                        [
+                            'code' => 'recoverable_pending_order',
+                            'message' => 'Reintenta el pago del pedido pendiente o recupera tu carrito.',
+                        ],
+                    ],
+                    'recoverable_order' => $this->orderService->guestRecoverableOrderPayload($recoverableOrder),
+                ],
+            ]);
+        }
+
         $guest = $this->guestPayloadFromRequest($request, requireGuestData: false);
-        $cart = $this->cartService->getOrCreateGuestCart($this->guestTokenFromRequest($request));
+        $cart = $this->cartService->getOrCreateGuestCart($guestToken);
         $cart = $this->salesChannelService->applyToCart(
             $cart,
             $this->salesChannelService->fromRequest($request),
@@ -171,8 +194,28 @@ class CheckoutController extends Controller
     {
         $this->ensureGuestCheckoutIsEnabled();
 
+        $guestToken = $this->guestTokenFromRequest($request, required: true);
+        $recoverableOrder = $this->orderService->findRecoverableGuestPendingOrder($guestToken);
+
+        if ($recoverableOrder) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Hay un pedido invitado pendiente de pago. Puedes reintentar el pago o recuperar tu carrito.',
+                'data' => [
+                    'can_checkout' => false,
+                    'blockers' => [
+                        [
+                            'code' => 'recoverable_pending_order',
+                            'message' => 'Reintenta el pago del pedido pendiente o recupera tu carrito.',
+                        ],
+                    ],
+                    'recoverable_order' => $this->orderService->guestRecoverableOrderPayload($recoverableOrder),
+                ],
+            ], 409);
+        }
+
         $guest = $this->guestPayloadFromRequest($request, requireGuestData: false);
-        $cart = $this->cartService->getOrCreateGuestCart($this->guestTokenFromRequest($request, required: true));
+        $cart = $this->cartService->getOrCreateGuestCart($guestToken);
         $cart = $this->salesChannelService->applyToCart(
             $cart,
             $this->salesChannelService->fromRequest($request),
@@ -446,6 +489,40 @@ class CheckoutController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Carrito recuperado correctamente.',
+            'data' => [
+                'cart' => new CartResource($cart),
+                'restored_from_order_id' => $order->id,
+                'order_deleted' => true,
+            ],
+        ]);
+    }
+
+    public function guestRestoreRecoverableOrder(Request $request): JsonResponse
+    {
+        $this->ensureGuestCheckoutIsEnabled();
+
+        $validated = $request->validate([
+            'order_id' => ['required', 'integer', 'exists:orders,id'],
+            'reason' => ['nullable', 'string', 'max:80'],
+        ]);
+        $guestToken = $this->guestTokenFromRequest($request, required: true);
+        $order = Order::query()
+            ->whereKey($validated['order_id'])
+            ->where('guest_token', $guestToken)
+            ->firstOrFail();
+
+        $order = $this->refreshPaymentOrderBeforeRestore($order);
+        abort_unless($order->isPendingPayment(), 422, 'Este pedido ya no se puede recuperar porque no está pendiente de pago.');
+
+        $cart = $this->orderService->restoreGuestCartFromPendingOrder(
+            order: $order,
+            guestToken: $guestToken,
+            reason: $validated['reason'] ?? 'guest_recoverable_order_accepted'
+        );
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Carrito invitado recuperado correctamente.',
             'data' => [
                 'cart' => new CartResource($cart),
                 'restored_from_order_id' => $order->id,

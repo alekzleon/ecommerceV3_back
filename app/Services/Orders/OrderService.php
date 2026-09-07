@@ -517,6 +517,49 @@ class OrderService
         });
     }
 
+    public function restoreGuestCartFromPendingOrder(Order $order, string $guestToken, string $reason = 'payment_cancelled'): Cart
+    {
+        return DB::transaction(function () use ($order, $guestToken, $reason) {
+            $order = Order::query()
+                ->with('cart')
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            abort_unless(hash_equals((string) $order->guest_token, $guestToken), 403, 'No tienes acceso a este pedido.');
+            abort_unless($order->isPendingPayment(), 422, 'Solo se puede recuperar un carrito de un pedido pendiente de pago.');
+            abort_unless($order->cart, 422, 'Este pedido no tiene un carrito asociado para recuperar.');
+            abort_unless($order->cart->status === CartStatus::CONVERTED->value, 422, 'El carrito asociado no está convertido.');
+
+            $cart = $order->cart;
+            $cart->forceFill([
+                'status' => CartStatus::ACTIVE->value,
+                'converted_at' => null,
+                'order_id' => null,
+                'last_activity_at' => now(),
+            ])->save();
+
+            $this->cartService->registerEvent(
+                cart: $cart,
+                user: null,
+                eventType: 'guest_order_cancelled_cart_restored',
+                eventData: [
+                    'order_id' => $order->id,
+                    'order_number' => $order->number,
+                    'reason' => $reason,
+                ]
+            );
+
+            $order->delete();
+
+            return $this->cartService->recalculateCart($cart)->load([
+                'user',
+                'items.product.category',
+                'items.product.family',
+            ]);
+        });
+    }
+
     public function findRecoverablePendingOrder(User $user, ?int $orderId = null): ?Order
     {
         $hasActiveCart = Cart::query()
@@ -531,6 +574,20 @@ class OrderService
         return Order::query()
             ->with('cart')
             ->where('user_id', $user->id)
+            ->where('status', Order::STATUS_PENDING_PAYMENT)
+            ->where('payment_status', Order::PAYMENT_PENDING)
+            ->where('created_at', '>=', now()->subDay())
+            ->when($orderId, fn ($query) => $query->whereKey($orderId))
+            ->whereHas('cart', fn ($query) => $query->where('status', CartStatus::CONVERTED->value))
+            ->latest('id')
+            ->first();
+    }
+
+    public function findRecoverableGuestPendingOrder(string $guestToken, ?int $orderId = null): ?Order
+    {
+        return Order::query()
+            ->with('cart')
+            ->where('guest_token', $guestToken)
             ->where('status', Order::STATUS_PENDING_PAYMENT)
             ->where('payment_status', Order::PAYMENT_PENDING)
             ->where('created_at', '>=', now()->subDay())
@@ -560,6 +617,22 @@ class OrderService
                 'mercadopago' => "/api/v1/checkout/orders/{$order->id}/mercadopago",
             ],
         ];
+    }
+
+    public function guestRecoverableOrderPayload(?Order $order): ?array
+    {
+        $payload = $this->recoverableOrderPayload($order);
+
+        if (! $payload || ! $order) {
+            return null;
+        }
+
+        $payload['restore_endpoint'] = '/api/v1/guest/checkout/recoverable-order/restore';
+        $payload['retry_payment_endpoints'] = [
+            'mercadopago' => "/api/v1/guest/checkout/orders/{$order->id}/mercadopago",
+        ];
+
+        return $payload;
     }
 
     protected function nextOrderNumber(): string
