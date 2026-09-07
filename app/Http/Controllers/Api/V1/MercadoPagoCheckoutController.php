@@ -18,6 +18,23 @@ class MercadoPagoCheckoutController extends Controller
     {
         abort_unless((int) $order->user_id === (int) $request->user()->id, 403, 'No tienes acceso a este pedido.');
 
+        return $this->startCheckout($request, $order);
+    }
+
+    public function guestCheckout(Request $request, Order $order): JsonResponse
+    {
+        $guestToken = $request->header('X-Guest-Token')
+            ?: $request->input('guest_token')
+            ?: $request->query('guest_token');
+
+        abort_unless(is_string($guestToken) && $guestToken !== '', 422, 'El token de carrito invitado es obligatorio.');
+        abort_unless(hash_equals((string) $order->guest_token, $guestToken), 403, 'No tienes acceso a este pedido.');
+
+        return $this->startCheckout($request, $order);
+    }
+
+    protected function startCheckout(Request $request, Order $order): JsonResponse
+    {
         $tenantHost = (string) $request->attributes->get('tenant_host');
         $origin = $this->storefrontOrigin($request, $tenantHost) ?: "https://{$tenantHost}";
         $gateway = $this->gateways->make(tenant(), 'mercadopago');

@@ -218,6 +218,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/guest/checkout/validate', [CheckoutController::class, 'guestValidateCart']);
         Route::post('/guest/checkout/orders', [CheckoutController::class, 'guestCreateOrder']);
         Route::get('/guest/checkout/orders/{order}', [CheckoutController::class, 'guestShowOrder']);
+        Route::post('/guest/checkout/orders/{order}/mercadopago', [MercadoPagoCheckoutController::class, 'guestCheckout']);
         Route::post('/guest/checkout/stripe/session', [CheckoutController::class, 'guestCreateStripeSession']);
         Route::post('/guest/checkout/stripe/session/confirm', [CheckoutController::class, 'guestConfirmStripeSession']);
     });
