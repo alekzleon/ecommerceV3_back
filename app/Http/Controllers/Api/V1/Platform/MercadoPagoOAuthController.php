@@ -128,7 +128,7 @@ class MercadoPagoOAuthController extends Controller
             return null;
         }
 
-        return rtrim($origin, '/').'/settings/payments';
+        return rtrim($origin, '/').'/admin/payments';
     }
 
     protected function connectionResource(?TenantPaymentConnection $connection = null): PaymentProviderConnectionResource
