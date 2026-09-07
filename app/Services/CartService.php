@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Models\VariantAttributeValue;
 use App\Services\ProductPriceService;
 use App\Services\Promotions\PromotionEngine;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -94,29 +95,54 @@ class CartService
     public function getOrCreateGuestCart(?string $guestToken = null): Cart
     {
         $guestToken = $this->normalizeGuestToken($guestToken) ?: $this->newGuestToken();
-        $cart = $this->getActiveGuestCart($guestToken);
+        $cart = Cart::query()
+            ->forGuest($guestToken)
+            ->latest('id')
+            ->first();
 
-        if ($cart) {
+        if ($cart?->status === CartStatus::ACTIVE->value) {
             return $cart;
         }
 
-        $cart = Cart::create([
-            'user_id' => null,
-            'guest_token' => $guestToken,
-            'status' => CartStatus::ACTIVE->value,
-            'currency' => 'MXN',
-            'source' => 'guest',
-            'sales_channel' => 'online_store',
-            'items_count' => 0,
-            'subtotal_snapshot' => 0,
-            'discount_snapshot' => 0,
-            'tax_snapshot' => 0,
-            'total_snapshot' => 0,
-            'last_activity_at' => now(),
-            'metadata' => [
-                'checkout_mode' => 'guest',
-            ],
-        ]);
+        // A guest token belongs to one cart for its whole lifecycle. A converted
+        // cart therefore receives a new token for the guest's next purchase.
+        if ($cart) {
+            $guestToken = $this->newGuestToken();
+        }
+
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            try {
+                $cart = Cart::create([
+                    'user_id' => null,
+                    'guest_token' => $guestToken,
+                    'status' => CartStatus::ACTIVE->value,
+                    'currency' => 'MXN',
+                    'source' => 'guest',
+                    'sales_channel' => 'online_store',
+                    'items_count' => 0,
+                    'subtotal_snapshot' => 0,
+                    'discount_snapshot' => 0,
+                    'tax_snapshot' => 0,
+                    'total_snapshot' => 0,
+                    'last_activity_at' => now(),
+                    'metadata' => [
+                        'checkout_mode' => 'guest',
+                    ],
+                ]);
+
+                break;
+            } catch (UniqueConstraintViolationException) {
+                $cart = $this->getActiveGuestCart($guestToken);
+
+                if ($cart) {
+                    return $cart;
+                }
+
+                $guestToken = $this->newGuestToken();
+            }
+        }
+
+        abort_unless(isset($cart), 503, 'No fue posible preparar el carrito invitado.');
 
         $this->registerEvent(
             cart: $cart,
